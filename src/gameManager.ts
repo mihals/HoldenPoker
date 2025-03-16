@@ -1,8 +1,15 @@
 enum COMBINATION  {BIGGEST_CARD, PAIR, TWO_PAIR, STREET, TRIPLE,
     FULL_HOUSE, FLASH, CARE, STREET_FLASH, ROYAL_FLASH };
-enum STEP {BET, PASS};
-enum GAMESTATE {BEGINNING, TWO_CARD, FLOP, TERN, RIVER, END};
-enum PLAYERSTATE {INGAME, PASSED};
+
+/** результат - состояние после розыгрыша раунда, определился ли победитель
+ *  или игра продолжается
+  */
+enum RESULT {CONTINUE, HAS_WINNER };
+
+/** фаза - игры флоп, терн и т.п. */
+enum GAMESTATE {APP_START, GAME_START, TWO_CARD_START, TWO_CARD, FLOP_START,
+     FLOP,TERN_START, TERN, RIVER, END};
+enum PLAYERSTATE {INGAME, PASSED, OUTGAME, WIN};
 type playersData = {"name":string, "money":number};
 type combi = {"combiName":COMBINATION, "cardValue": number, "combiArr": Array<number> };
 
@@ -19,7 +26,7 @@ interface IPlayer{
     setTwoCard(firstCard:number, secondCard:number):void;
 
     /** ставка перед началом игры */
-    doBet():boolean
+    doBet(boolean):void
 
     /** открываются три карты */
     flop():void;
@@ -32,7 +39,7 @@ interface IPlayer{
 }
 
 /** массив игроков */
-export let playersArr:Array<IPlayer>=[];
+//export let playersArr:Array<IPlayer>=[];
 
 /** карты на столе */
 let tableArr:Array<number>=[];
@@ -41,7 +48,8 @@ export class GameManager {
     /** массив перетасованных карт */
     shuffledArr: Array<number>;
 
-    //tableArr:Array<number>;
+    /** карты на столе */
+    myTableArr:Array<number>;
 
     /** фаза игры - GAMESTATE */
     gameState: GAMESTATE;
@@ -49,44 +57,55 @@ export class GameManager {
     /** банк игры */
     gameBank: number = 0;
 
+    myUser:IPlayer;
+    myLeftBot:IPlayer;
+    myRightBot:IPlayer;
+
+    /** массив игроков */
+    playersArr:Array<IPlayer>=[];
+
+    /** массив комбинаций игроков */
+    playersCombiArr:Array<{combi:combi, player:string}> =[];
+
+    //winners:Array<IPlayer>=[];
+
     constructor() {
 
     }
 
-    /** проверяем платёжеспособность игроков и, если все при деньгах 
-     * тасуем карты и возвращаем пустой массив, в противном случае возвращаем
-     * массив объектов с данными неплатёжеспособных игроков
+    /** тасуем карты, в зависимости от номера уровня назначаем имена игрокам,
+     * которые и определяют их стратегию, сдаём им по две карты
      */
-    prepareGame(plrsData: Array<playersData>): Array<playersData> {
-        let failedPlrsData: Array<playersData> = [];
-        plrsData.forEach((fPlr) => {
-            if (fPlr.money < 50)
-                failedPlrsData.push({ "name": fPlr.name, "money": fPlr.money });
-        });
+    prepareGame(numLvl:number) {
+        // let failedPlrsData: Array<playersData> = [];
+        // plrsData.forEach((fPlr) => {
+        //     if (fPlr.money < 50)
+        //         failedPlrsData.push({ "name": fPlr.name, "money": fPlr.money });
+        // });
 
-        if (failedPlrsData.length != 0) return failedPlrsData;
+        // if (failedPlrsData.length != 0) return failedPlrsData;
 
-        /** если все игроки при деньгах, создаём массив игроков в таком порядке:
-         * user, oslik, khrusha - User, LeftBot, RightBot и тасуем карты
-          */
-        let tmpData: Array<playersData>;
-        tmpData = plrsData.filter((plrData) => {
-            if (plrData.name == "user") return true;
-            return false;
-        });
-        playersArr.push(new User(tmpData[0].name, tmpData[0].money));
+        // /** если все игроки при деньгах, создаём массив игроков в таком порядке:
+        //  * user, oslik, khrusha - User, LeftBot, RightBot и тасуем карты
+        //   */
+        // let tmpData: Array<playersData>;
+        // tmpData = plrsData.filter((plrData) => {
+        //     if (plrData.name == "user") return true;
+        //     return false;
+        // });
+        // this.playersArr.push(new User(tmpData[0].name, tmpData[0].money));
 
-        tmpData = plrsData.filter((plrData) => {
-            if (plrData.name == "oslik") return true;
-            return false;
-        });
-        playersArr.push(new LeftBot(tmpData[0].name, tmpData[0].money));
+        // tmpData = plrsData.filter((plrData) => {
+        //     if (plrData.name == "oslik") return true;
+        //     return false;
+        // });
+        // this.playersArr.push(new LeftBot(tmpData[0].name, tmpData[0].money));
 
-        tmpData = plrsData.filter((plrData) => {
-            if (plrData.name == "khrusha") return true;
-            return false;
-        });
-        playersArr.push(new RightBot(tmpData[0].name, tmpData[0].money));
+        // tmpData = plrsData.filter((plrData) => {
+        //     if (plrData.name == "khrusha") return true;
+        //     return false;
+        // });
+        // this.playersArr.push(new RightBot(tmpData[0].name, tmpData[0].money));
 
         let cardsArr: Array<number> = [];
 
@@ -96,73 +115,211 @@ export class GameManager {
 
         this.shuffledArr = [...cardsArr];
         this.shuffledArr.sort(() => Math.random() - 0.5);
-        return failedPlrsData;
+
+        switch(numLvl){
+            case 1:
+                this.myUser = new User("user",100);
+                this.myLeftBot = new LeftBot("oslik",100);
+                this.myRightBot = new RightBot("piggi",100);
+
+                this.playersArr.push(this.myUser);
+                this.playersArr.push(this.myLeftBot);
+                this.playersArr.push(this.myRightBot);
+
+                // this.playersArr.forEach(plr => {
+                //     plr.setTwoCard(this.shuffledArr.shift(),this.shuffledArr.shift());
+                // });
+                break;
+        }
     }
 
     /** проверяем состояние игры - у всех ли игроков хватает средств, чтобы
      * продолжить игру, сколько осталось непасовавших игроков
      */
     checkGameState() {
-        let failedPlrsData: Array<playersData> = [];
-        playersArr.forEach((fPlr) => {
-            if (fPlr.coins < 50)
-                failedPlrsData.push({ "name": fPlr.name, "money": fPlr.coins });
-        });
-
-        return failedPlrsData;
-    }
-
-    /** снимает монеты с игроков, добавляет их в банк и сдаёт по две карты */
-    setTwoCard() {
-        playersArr.forEach((plr) => {
-            plr.coins -= 5;
-            this.gameBank += 5;
-        })
-
-        playersArr.forEach((plr) => {
-            plr.setTwoCard(this.shuffledArr.pop(), this.shuffledArr.pop())
-        })
-    }
-
-    /** получает аргументом выбор игрока - пас или ставка, далее принимаются ставки,
- * если остался один не пасовавший, то он и забирает банк, если пасовали все,
- * то ищем сильнейшую комбинацию и определяем победителя, если в игре осталось
- * больше одного игрока, продолжаем - открываем первые три карты, переходим
- * к терну */
-    playFlop(playerState: PLAYERSTATE) {
-        // если игрок пасовал
-        if (playerState == PLAYERSTATE.PASSED) {
-            playersArr[0].playerState = PLAYERSTATE.PASSED;
-        }
-
-        // игроки делают ставки или пасуют
-        playersArr.forEach((plr) => plr.doBet());
-
         // проверяем оставшихся в игре
-        let activePlrs = playersArr.filter((plr) => {
+        let activePlrs = this.playersArr.filter((plr) => {
             return (plr.playerState == PLAYERSTATE.INGAME);
         })
+
+        // если число непасовавших игроков больше одного, игру не
+        // не останавливаем, выходим из функции
+        if(activePlrs.length <= 1){
+            this.gameState = GAMESTATE.END;
+        } 
+
+        return;
 
         // если остался лишь один игрок, то он и получает банк
         if (activePlrs.length == 1) {
             activePlrs[0].coins += this.gameBank;
             this.gameBank = 0;
+            activePlrs[0].playerState = PLAYERSTATE.WIN;
+            //this.winners.push(activePlrs[0]);
             this.gameState = GAMESTATE.END;
             return;
         }
 
-        // если пасовали все, ищем победителей, делим банк
-        if (activePlrs.length == 0) {
-            let winners = findBestCombi();
-            let profit = this.gameBank / winners.length;
-            winners.forEach((plr) => {
-                plr.coins += profit;
-            })
+        // если пасовали все, ищем победителей и сортируем тех, кто пасовал 
+        // последними, делим банк
+        this.sortCombi();
+
+        // выбираем только что пасовавших
+        activePlrs = this.playersArr.filter((plr) => {
+            return (plr.playerState == PLAYERSTATE.PASSED);
+        })
+
+        // если последним пасовал только один, то он и выиграл
+        if(activePlrs.length == 1){
+            activePlrs[0].playerState = PLAYERSTATE.WIN;
+            activePlrs[0].coins += this.gameBank;
             this.gameBank = 0;
+            //this.winners.push(activePlrs[0]);
             this.gameState = GAMESTATE.END;
             return;
         }
 
+        //activePlrs[0].playerState = PLAYERSTATE.WIN;
+
+        // если пасовало несколько игроков, ищем игрока с самой сильной
+        // комбинацией и если игроков с равными комбинациями несколько, 
+        // то делим выигрыш между ними
+        activePlrs.forEach((plr) => {
+            if(plr.myCombi.combiName == activePlrs[0].myCombi.combiName &&
+                plr.myCombi.cardValue == activePlrs[0].myCombi.cardValue){
+                    plr.playerState = PLAYERSTATE.WIN;
+                }
+        })
+
+        let winPlayers:IPlayer[] = this.playersArr.filter((plr) => {
+            if(plr.playerState == PLAYERSTATE.WIN) return true;
+        }) 
+
+        let price = Math.ceil(this.gameBank/winPlayers.length/10)*10;
+        winPlayers.forEach((plr) => {
+            plr.coins+=price;
+        })
+        this.gameBank = 0;
+    }
+
+    /** сортирует комбинации игроков */
+    sortCombi(){
+        this.playersCombiArr = [] ;
+        this.playersCombiArr.push({combi:this.myUser.myCombi, player: "user"},
+            {combi:this.myLeftBot.myCombi, player: "leftBot"},
+            {combi:this.myRightBot.myCombi, player: "rightBot"});
+
+        this.playersCombiArr.sort((f,s) => {
+            if(f.combi.combiName > s.combi.combiName) return 1;
+            if(f.combi.combiName == s.combi.combiName){
+                if(f.combi.cardValue%9 > s.combi.cardValue%9) return 1;
+                if(f.combi.cardValue%9 < s.combi.cardValue%9) return -1;
+                return 0;
+            }
+            return -1;
+        });
+
+        this.playersCombiArr.reverse();
+    }
+
+    /** снимает монеты с игроков, добавляет их в банк и сдаёт по две карты */
+    setTwoCard() {
+        this.playersArr.forEach((plr) => {
+            plr.coins -= 10;
+            this.gameBank += 10;
+        })
+
+        this.playersArr.forEach((plr) => {
+            plr.setTwoCard(this.shuffledArr.pop(), this.shuffledArr.pop())
+        })
+
+        //this.checkGameState();
+
+        // ищем игроков, у которых закончились монеты
+        // let nullCoinsArr = this.playersArr.filter((plr) => {
+        //     if(plr.coins == 0) return true;
+        // })
+
+        // if(nullCoinsArr.length != 0){
+        //    this.gameState = GAMESTATE.END;
+        //    return;
+        // } 
+    }
+
+    /** получает аргументом выбор игрока - пас или ставка, далее принимаются ставки,
+    * если остался один не пасовавший, то он и забирает банк, если пасовали все,
+    * то ищем сильнейшую комбинацию и определяем победителя, если в игре осталось
+    * больше одного игрока, продолжаем - открываем первые три карты, переходим
+    * к терну */
+    playFlop(isBet: boolean) {
+        if (this.playersArr[1].name == "oslik") {
+            if (this.playersArr[1].coins >= 10) {
+                this.playersArr[1].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+
+        // если игрок пасовал
+        if (!isBet) {
+            if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+            if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+
+            if (this.playersArr[2].name == "piggi") {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+        } else {
+            if (this.playersArr[0].coins >= 10) {
+                this.playersArr[0].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+            }
+
+            if (this.playersArr[2].name == "piggi") {
+                if (this.playersArr[2].coins >= 10) {
+                    this.playersArr[2].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+            
+        this.checkGameState();
+
+        if(this.gameState == GAMESTATE.END) return;
+
+        this.gameState = GAMESTATE.FLOP;
+        
+            // let nullCoinsArr = this.playersArr.filter((plr) => {
+            //     if(plr.coins == 0) return true;
+            // })
+
+            // if(nullCoinsArr.length != 0){
+            //    this.gameState = GAMESTATE.END;
+            //    return;
+            // } 
 
         tableArr.push(this.shuffledArr.pop(), this.shuffledArr.pop(),
             this.shuffledArr.pop());
@@ -170,10 +327,90 @@ export class GameManager {
             if (a % 9 == b % 9) return a - b;
             return a % 9 - b % 9;
         })
+
+        this.playersArr.forEach((plr) => {
+            if (plr.playerState == PLAYERSTATE.INGAME)
+                plr.flop();
+        })
+
+        this.myTableArr = tableArr;
+    }
+
+    playTern(isBet:boolean){
+        if (this.playersArr[1].name == "oslik") {
+            if (this.playersArr[1].coins >= 10) {
+                this.playersArr[1].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+
+        // если игрок пасовал
+        if (!isBet) {
+            if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+            if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+
+            if (this.playersArr[2].name == "piggi") {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+        } else {
+            if (this.playersArr[0].coins >= 10) {
+                this.playersArr[0].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+            }
+
+            if (this.playersArr[2].name == "piggi") {
+                if (this.playersArr[2].coins >= 10) {
+                    this.playersArr[2].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+            
+        this.checkGameState();
+
+        if(this.gameState == GAMESTATE.END) return;
+
+        this.gameState = GAMESTATE.TERN;
+
+        tableArr.push(this.shuffledArr.pop());
+        // tableArr.sort((a, b) => {
+        //     if (a % 9 == b % 9) return a - b;
+        //     return a % 9 - b % 9;
+        // })
+
+        this.playersArr.forEach((plr) => {
+            if (plr.playerState == PLAYERSTATE.INGAME)
+                plr.tern();
+        })
+
+        this.myTableArr = tableArr;
     }
 }
-    
-
 
 
 
@@ -427,8 +664,17 @@ class User implements IPlayer
         this.playerState = PLAYERSTATE.INGAME;
     }
 
-    doBet():boolean{
-        if(this.playerState == PLAYERSTATE.PASSED) return false;
+    doBet(bool:boolean):boolean{
+        if(!bool && this.playerState == PLAYERSTATE.PASSED)
+        {
+            this.playerState = PLAYERSTATE.OUTGAME;
+            return;
+        }
+
+        if(bool){
+            this.coins-=10;
+            
+        }
 
         if(this.coins >= 50){
             this.coins-=50;

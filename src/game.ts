@@ -4,7 +4,9 @@ import { PokerRoom } from './pokerRoom';
 let myGame: Phaser.Game;
 
 export function startGame(){
-    
+
+    globalThis.levelsData = [];
+
     const config = {
         type: Phaser.AUTO,
         backgroundColor: '#bfc874',
