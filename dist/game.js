@@ -241566,7 +241566,9 @@ var MyGame = (function (exports) {
       RESULT[RESULT["CONTINUE"] = 0] = "CONTINUE";
       RESULT[RESULT["HAS_WINNER"] = 1] = "HAS_WINNER";
   })(RESULT || (RESULT = {}));
-  /** фаза - игры флоп, терн и т.п. */
+  /** фазы игры флоп, терн, окончание розыгрыша END, результат прохождения уровня -
+   *  LEVEL_WIN - уровень пройден, LEVEL_LOST - уровень не пройден, LEVEL_BEST -
+   *  уровень пройден не впервые и улучшен предыдущий результат и т.п. */
   var GAMESTATE$1;
   (function (GAMESTATE) {
       GAMESTATE[GAMESTATE["APP_START"] = 0] = "APP_START";
@@ -241577,8 +241579,14 @@ var MyGame = (function (exports) {
       GAMESTATE[GAMESTATE["FLOP"] = 5] = "FLOP";
       GAMESTATE[GAMESTATE["TERN_START"] = 6] = "TERN_START";
       GAMESTATE[GAMESTATE["TERN"] = 7] = "TERN";
-      GAMESTATE[GAMESTATE["RIVER"] = 8] = "RIVER";
-      GAMESTATE[GAMESTATE["END"] = 9] = "END";
+      GAMESTATE[GAMESTATE["RIVER_START"] = 8] = "RIVER_START";
+      GAMESTATE[GAMESTATE["RIVER"] = 9] = "RIVER";
+      GAMESTATE[GAMESTATE["END"] = 10] = "END";
+      GAMESTATE[GAMESTATE["RESULT"] = 11] = "RESULT";
+      GAMESTATE[GAMESTATE["CONTINUE"] = 12] = "CONTINUE";
+      GAMESTATE[GAMESTATE["LEVEL_WIN"] = 13] = "LEVEL_WIN";
+      GAMESTATE[GAMESTATE["LEVEL_LOST"] = 14] = "LEVEL_LOST";
+      GAMESTATE[GAMESTATE["LEVEL_BEST"] = 15] = "LEVEL_BEST";
   })(GAMESTATE$1 || (GAMESTATE$1 = {}));
   var PLAYERSTATE$1;
   (function (PLAYERSTATE) {
@@ -241592,7 +241600,6 @@ var MyGame = (function (exports) {
   /** карты на столе */
   let tableArr = [];
   class GameManager {
-      //winners:Array<IPlayer>=[];
       constructor() {
           /** банк игры */
           this.gameBank = 0;
@@ -241600,6 +241607,12 @@ var MyGame = (function (exports) {
           this.playersArr = [];
           /** массив комбинаций игроков */
           this.playersCombiArr = [];
+          /** массив игроков продолжающих игру */
+          this.playersInGame = [];
+          /** игроки - победители розыгрыша */
+          this.winnersPlayers = [];
+          /** итоги игроков после прохождения уровня */
+          this.lvlWinners = [];
       }
       /** тасуем карты, в зависимости от номера уровня назначаем имена игрокам,
        * которые и определяют их стратегию, сдаём им по две карты
@@ -241630,6 +241643,7 @@ var MyGame = (function (exports) {
           //     return false;
           // });
           // this.playersArr.push(new RightBot(tmpData[0].name, tmpData[0].money));
+          this.playersArr = [];
           let cardsArr = [];
           for (let i = 0; i < 36; i++) {
               cardsArr.push(i);
@@ -241638,9 +241652,9 @@ var MyGame = (function (exports) {
           this.shuffledArr.sort(() => Math.random() - 0.5);
           switch (numLvl) {
               case 1:
-                  this.myUser = new User("user", 100);
-                  this.myLeftBot = new LeftBot("oslik", 100);
-                  this.myRightBot = new RightBot("piggi", 100);
+                  this.myUser = new User("user", 50);
+                  this.myLeftBot = new LeftBot("oslik", 50);
+                  this.myRightBot = new RightBot("piggi", 50);
                   this.playersArr.push(this.myUser);
                   this.playersArr.push(this.myLeftBot);
                   this.playersArr.push(this.myRightBot);
@@ -241648,22 +241662,130 @@ var MyGame = (function (exports) {
                   //     plr.setTwoCard(this.shuffledArr.shift(),this.shuffledArr.shift());
                   // });
                   break;
+              case 2:
+                  this.myUser = new User("user", 70);
+                  this.myLeftBot = new LeftBot("izabelle", 70);
+                  this.myRightBot = new RightBot("pirate", 70);
+                  this.playersArr.push(this.myUser);
+                  this.playersArr.push(this.myLeftBot);
+                  this.playersArr.push(this.myRightBot);
+                  break;
           }
       }
-      /** проверяем состояние игры - у всех ли игроков хватает средств, чтобы
-       * продолжить игру, сколько осталось непасовавших игроков
+      /** проверяет не закончилась ли игра, определяет оставшихся
+       * в игре персов
        */
       checkGameState() {
+          this.playersInGame = [];
           // проверяем оставшихся в игре
           let activePlrs = this.playersArr.filter((plr) => {
               return (plr.playerState == PLAYERSTATE$1.INGAME);
           });
+          activePlrs.forEach((plr) => {
+              this.playersInGame.push(plr);
+          });
           // если число непасовавших игроков больше одного, игру не
           // не останавливаем, выходим из функции
-          if (activePlrs.length <= 1) {
-              this.gameState = GAMESTATE$1.END;
+          if (activePlrs.length > 1)
+              return;
+          this.gameState = GAMESTATE$1.END;
+          //this.getResult();
+      }
+      /** проверяет не закончен ли уровень - это случается, если у хотя бы
+       * одного из игроков закончились монеты
+       */
+      checkLevelState() {
+          this.lvlWinners = [];
+          this.playersArr.forEach((plr) => {
+              this.lvlWinners.push(plr);
+          });
+          this.lvlWinners.sort((f, s) => {
+              return s.coins - f.coins;
+          });
+          if (this.lvlWinners[this.lvlWinners.length - 1].coins == 0) {
+              if (this.myUser.coins == this.lvlWinners[0].coins) {
+                  this.gameState = GAMESTATE$1.LEVEL_WIN;
+              }
+              else {
+                  this.gameState = GAMESTATE$1.LEVEL_LOST;
+              }
           }
-          return;
+      }
+      /** определяем победителей игры, заносим их в массив winnersPlayers,
+       * вычисляем и начисляем выигрыш
+      */
+      getResult() {
+          let activePlrs = this.playersArr.filter((plr) => {
+              return (plr.playerState == PLAYERSTATE$1.INGAME);
+          });
+          // если остался лишь один игрок, то он и получает банк
+          if (activePlrs.length == 1) {
+              activePlrs[0].coins += this.gameBank;
+              //this.gameBank = 0;
+              this.winnersPlayers.push(activePlrs[0]);
+              return;
+          }
+          if (activePlrs.length != 0) {
+              // если игру закончило несколько игроков, сортируем их по силе
+              // комбинаций 
+              activePlrs.sort((f, s) => {
+                  if (f.myCombi.combiName > s.myCombi.combiName)
+                      return 1;
+                  if (f.myCombi.combiName == s.myCombi.combiName) {
+                      if (f.myCombi.cardValue % 9 > s.myCombi.cardValue % 9)
+                          return 1;
+                      if (f.myCombi.cardValue % 9 < s.myCombi.cardValue % 9)
+                          return -1;
+                      return 0;
+                  }
+                  return -1;
+              });
+              // упорядочиваем по убыванию
+              activePlrs.reverse();
+              // выбираем игроков с самой сильной комбинацией (их может быть
+              // несколько)
+              activePlrs.forEach((plr) => {
+                  if (plr.myCombi.combiName == activePlrs[0].myCombi.combiName &&
+                      plr.myCombi.cardValue == activePlrs[0].myCombi.cardValue) {
+                      this.winnersPlayers.push(plr);
+                  }
+              });
+              let price = Math.ceil(this.gameBank / this.winnersPlayers.length / 10) * 10;
+              this.winnersPlayers.forEach((plr) => {
+                  plr.coins += price;
+              });
+              //this.gameBank = 0;
+              return;
+          }
+          // если пасовали все, сортируем игроков по силе комбинаций,
+          // ищем победителей из тех, кто пасовал последними, делим банк
+          // если остались непасовавшие, выбираем из их числа
+          //this.sortCombi();
+          // если непасовавших нет, выбираем только что пасовавших
+          activePlrs = this.playersArr.filter((plr) => {
+              return (plr.playerState == PLAYERSTATE$1.PASSED);
+          });
+          // если последним пасовал только один, то он и выиграл
+          if (activePlrs.length == 1) {
+              activePlrs[0].coins += this.gameBank;
+              this.gameBank = 0;
+              this.winnersPlayers.push(activePlrs[0]);
+              return;
+          }
+          // если пасовало несколько игроков, ищем игрока с самой сильной
+          // комбинацией и если игроков с равными комбинациями несколько, 
+          // то делим выигрыш между ними
+          activePlrs.forEach((plr) => {
+              if (plr.myCombi.combiName == activePlrs[0].myCombi.combiName &&
+                  plr.myCombi.cardValue == activePlrs[0].myCombi.cardValue) {
+                  this.winnersPlayers.push(plr);
+              }
+          });
+          let price = Math.ceil(this.gameBank / this.winnersPlayers.length / 10) * 10;
+          this.winnersPlayers.forEach((plr) => {
+              plr.coins += price;
+          });
+          this.gameBank = 0;
       }
       /** сортирует комбинации игроков */
       sortCombi() {
@@ -241682,6 +241804,36 @@ var MyGame = (function (exports) {
               return -1;
           });
           this.playersCombiArr.reverse();
+          this.playersInGame.sort((f, s) => {
+              if (f.myCombi.combiName > s.myCombi.combiName)
+                  return 1;
+              if (f.myCombi.combiName == s.myCombi.combiName) {
+                  if (f.myCombi.cardValue % 9 > s.myCombi.cardValue % 9)
+                      return 1;
+                  if (f.myCombi.cardValue % 9 < s.myCombi.cardValue % 9)
+                      return -1;
+                  return 0;
+              }
+              return -1;
+          });
+          this.playersInGame.reverse();
+      }
+      /** очищает от данных для начала следуей игры(розыгрыша банка) */
+      completeGame() {
+          this.playersArr.forEach((plr) => {
+              plr.completeGame();
+          });
+          let cardsArr = [];
+          for (let i = 0; i < 36; i++) {
+              cardsArr.push(i);
+          }
+          this.shuffledArr = [...cardsArr];
+          this.shuffledArr.sort(() => Math.random() - 0.5);
+          this.playersCombiArr = [];
+          this.winnersPlayers = [];
+          this.gameBank = 0;
+          this.myTableArr = [];
+          tableArr = [];
       }
       /** снимает монеты с игроков, добавляет их в банк и сдаёт по две карты */
       setTwoCard() {
@@ -241692,7 +241844,7 @@ var MyGame = (function (exports) {
           this.playersArr.forEach((plr) => {
               plr.setTwoCard(this.shuffledArr.pop(), this.shuffledArr.pop());
           });
-          //this.checkGameState();
+          this.checkGameState();
           // ищем игроков, у которых закончились монеты
           // let nullCoinsArr = this.playersArr.filter((plr) => {
           //     if(plr.coins == 0) return true;
@@ -241842,6 +241994,68 @@ var MyGame = (function (exports) {
           this.playersArr.forEach((plr) => {
               if (plr.playerState == PLAYERSTATE$1.INGAME)
                   plr.tern();
+          });
+          this.myTableArr = tableArr;
+      }
+      playRiver(isBet) {
+          if (this.playersArr[1].name == "oslik") {
+              if (this.playersArr[1].coins >= 10) {
+                  this.playersArr[1].coins -= 10;
+                  this.gameBank += 10;
+              }
+              else {
+                  if (this.playersArr[1].playerState == PLAYERSTATE$1.PASSED)
+                      this.playersArr[1].playerState = PLAYERSTATE$1.OUTGAME;
+                  if (this.playersArr[1].playerState == PLAYERSTATE$1.INGAME)
+                      this.playersArr[1].playerState = PLAYERSTATE$1.PASSED;
+              }
+          }
+          // если игрок пасовал
+          if (!isBet) {
+              if (this.playersArr[0].playerState == PLAYERSTATE$1.PASSED)
+                  this.playersArr[0].playerState = PLAYERSTATE$1.OUTGAME;
+              if (this.playersArr[0].playerState == PLAYERSTATE$1.INGAME)
+                  this.playersArr[0].playerState = PLAYERSTATE$1.PASSED;
+              if (this.playersArr[2].name == "piggi") {
+                  if (this.playersArr[2].playerState == PLAYERSTATE$1.PASSED)
+                      this.playersArr[2].playerState = PLAYERSTATE$1.OUTGAME;
+                  if (this.playersArr[2].playerState == PLAYERSTATE$1.INGAME)
+                      this.playersArr[2].playerState = PLAYERSTATE$1.PASSED;
+              }
+          }
+          else {
+              if (this.playersArr[0].coins >= 10) {
+                  this.playersArr[0].coins -= 10;
+                  this.gameBank += 10;
+              }
+              else {
+                  if (this.playersArr[0].playerState == PLAYERSTATE$1.PASSED)
+                      this.playersArr[0].playerState = PLAYERSTATE$1.OUTGAME;
+                  if (this.playersArr[0].playerState == PLAYERSTATE$1.INGAME)
+                      this.playersArr[0].playerState = PLAYERSTATE$1.PASSED;
+              }
+              if (this.playersArr[2].name == "piggi") {
+                  if (this.playersArr[2].coins >= 10) {
+                      this.playersArr[2].coins -= 10;
+                      this.gameBank += 10;
+                  }
+                  else {
+                      if (this.playersArr[2].playerState == PLAYERSTATE$1.PASSED)
+                          this.playersArr[2].playerState = PLAYERSTATE$1.OUTGAME;
+                      if (this.playersArr[2].playerState == PLAYERSTATE$1.INGAME)
+                          this.playersArr[2].playerState = PLAYERSTATE$1.PASSED;
+                  }
+              }
+          }
+          //this.gameState == GAMESTATE.END;
+          this.checkGameState();
+          if (this.gameState == GAMESTATE$1.END)
+              return;
+          //this.gameState = GAMESTATE.TERN;
+          tableArr.push(this.shuffledArr.pop());
+          this.playersArr.forEach((plr) => {
+              if (plr.playerState == PLAYERSTATE$1.INGAME)
+                  plr.river();
           });
           this.myTableArr = tableArr;
       }
@@ -242105,6 +242319,11 @@ var MyGame = (function (exports) {
           this.playerState = PLAYERSTATE$1.PASSED;
           return false;
       }
+      /** очищает от данных для начала следуей игры(зозыгрыша банка) */
+      completeGame() {
+          this.twoCardArr = [];
+          this.playerState = PLAYERSTATE$1.INGAME;
+      }
       /** сдаются две карты */
       setTwoCard(firstCard, secondCard) {
           this.myCombi = findCombi([firstCard, secondCard]);
@@ -242118,7 +242337,12 @@ var MyGame = (function (exports) {
       tern() {
           let newCombi;
           let bestCombi = this.myCombi;
+          // для теста
+          //tableArr = [19,28,5,14];
           let tmpArr = tableArr.slice();
+          // для теста
+          //tmpArr = [19,28,5,14];
+          //this.twoCardArr = [20,17];
           for (let i = 0; i < 4; i++) {
               tmpArr.splice(i, 1);
               newCombi = findCombi(this.twoCardArr.concat(tmpArr));
@@ -242183,6 +242407,11 @@ var MyGame = (function (exports) {
           }
           this.playerState = PLAYERSTATE$1.PASSED;
           return false;
+      }
+      /** очищает от данных для начала следуей игры(зозыгрыша банка) */
+      completeGame() {
+          this.twoCardArr = [];
+          this.playerState = PLAYERSTATE$1.INGAME;
       }
       /** сдаются две карты */
       setTwoCard(firstCard, secondCard) {
@@ -242262,6 +242491,11 @@ var MyGame = (function (exports) {
           }
           this.playerState = PLAYERSTATE$1.PASSED;
           return false;
+      }
+      /** очищает от данных для начала следуей игры(зозыгрыша банка) */
+      completeGame() {
+          this.twoCardArr = [];
+          this.playerState = PLAYERSTATE$1.INGAME;
       }
       /** сдаются две карты */
       setTwoCard(firstCard, secondCard) {
@@ -242360,8 +242594,14 @@ var MyGame = (function (exports) {
       GAMESTATE[GAMESTATE["FLOP"] = 5] = "FLOP";
       GAMESTATE[GAMESTATE["TERN_START"] = 6] = "TERN_START";
       GAMESTATE[GAMESTATE["TERN"] = 7] = "TERN";
-      GAMESTATE[GAMESTATE["RIVER"] = 8] = "RIVER";
-      GAMESTATE[GAMESTATE["END"] = 9] = "END";
+      GAMESTATE[GAMESTATE["RIVER_START"] = 8] = "RIVER_START";
+      GAMESTATE[GAMESTATE["RIVER"] = 9] = "RIVER";
+      GAMESTATE[GAMESTATE["END"] = 10] = "END";
+      GAMESTATE[GAMESTATE["RESULT"] = 11] = "RESULT";
+      GAMESTATE[GAMESTATE["CONTINUE"] = 12] = "CONTINUE";
+      GAMESTATE[GAMESTATE["LEVEL_WIN"] = 13] = "LEVEL_WIN";
+      GAMESTATE[GAMESTATE["LEVEL_LOST"] = 14] = "LEVEL_LOST";
+      GAMESTATE[GAMESTATE["LEVEL_BEST"] = 15] = "LEVEL_BEST";
   })(GAMESTATE || (GAMESTATE = {}));
   var PLAYERSTATE;
   (function (PLAYERSTATE) {
@@ -242378,8 +242618,8 @@ var MyGame = (function (exports) {
           super("pokerRoom");
           /** массив, визуальное представление игроков */
           this.playersViewArr = [];
-          this.playersDataArr = [{ "name": "user", "money": 100 },
-              { "name": "oslik", "money": 100 }, { "name": "khrusha", "money": 100 }];
+          this.playersDataArr = [{ "name": "user", "money": 200 },
+              { "name": "oslik", "money": 200 }, { "name": "khrusha", "money": 200 }];
           this.gameState = GAMESTATE.APP_START;
           this.prevState = GAMESTATE.APP_START;
           this.currentState = GAMESTATE.APP_START;
@@ -242412,6 +242652,7 @@ var MyGame = (function (exports) {
           this.load.image('coins', "coins.png");
           this.load.image('helpBtn', "help.png");
           this.load.image('coin', "coin.png");
+          this.load.image('continueBtn0', 'continueBtn0.png');
           for (let i = 0; i < 36; i++) {
               this.load.image(("card" + i), ("card" + i + ".png"));
           }
@@ -242451,6 +242692,7 @@ var MyGame = (function (exports) {
           this.helpBtn.on('pointerdown', () => {
               if (this.helpBtn.state == 0)
                   return;
+              this.myDomManager.showHelp();
           });
           myScene = this;
           this.domElement = this.add.dom(450, -600, 'div');
@@ -242490,6 +242732,23 @@ var MyGame = (function (exports) {
           //     this.add.image(313 + i*66, 1030, ("card"+i));
           // }
           this.tableCards[0] = this.add.image(168, 700, "empty"); //.setDepth(2);
+          this.tableCards[1] = this.add.image(this.tableCards[0].x + 70, 700, "empty");
+          this.tableCards[2] = this.add.image(this.tableCards[1].x + 70, 700, "empty");
+          this.tableCards[3] = this.add.image(this.tableCards[2].x + 70, 700, "empty");
+          this.tableCards[4] = this.add.image(this.tableCards[3].x + 70, 700, "empty");
+          //this.add.image(450,1150, 'continueBtn0');
+          this.contBtn = this.add.image(450, 1150, 'empty');
+          this.contBtn.on('pointerdown', () => {
+              this.contBtn.disableInteractive();
+              this.add.tween({
+                  targets: this.contBtn,
+                  scale: 0,
+                  duration: 500,
+                  onComplete: () => {
+                      this.missingState = GAMESTATE.RESULT;
+                  }
+              });
+          });
           this.prepareApp();
       }
       update(time, delta) {
@@ -242516,14 +242775,15 @@ var MyGame = (function (exports) {
               case GAMESTATE.GAME_START:
                   this.myGameManager.prepareGame(globalThis.numLevel);
                   this.myUserView = new UserView(this.myGameManager.myUser.name, this.myGameManager.myUser.coins);
-                  this.myLeftBotView = new LeftBotView(this.myGameManager.myLeftBot.name, this.myGameManager.myUser.coins);
-                  this.myRightBotView = new RightBotView(this.myGameManager.myRightBot.name, this.myGameManager.myUser.coins);
+                  this.myLeftBotView = new LeftBotView(this.myGameManager.myLeftBot.name, this.myGameManager.myLeftBot.coins);
+                  this.myRightBotView = new RightBotView(this.myGameManager.myRightBot.name, this.myGameManager.myRightBot.coins);
                   this.cowboyCM.reset();
                   break;
               case GAMESTATE.TWO_CARD_START:
                   this.myDomManager.inviteToTwoCard();
                   break;
               case GAMESTATE.TWO_CARD:
+                  this.myGameManager.gameState = GAMESTATE.TWO_CARD_START;
                   this.myGameManager.setTwoCard();
                   this.myGameManager.sortCombi();
                   this.showTwoCard();
@@ -242556,7 +242816,10 @@ var MyGame = (function (exports) {
                       {
                           from: 1000,
                           run: () => {
-                              if (this.myGameManager.gameState != GAMESTATE.END) {
+                              if (this.myGameManager.gameState == GAMESTATE.END) {
+                                  this.missingState = GAMESTATE.END;
+                              }
+                              else {
                                   this.showFlop();
                               }
                           }
@@ -242591,14 +242854,114 @@ var MyGame = (function (exports) {
                       {
                           from: 1000,
                           run: () => {
-                              if (this.myGameManager.gameState != GAMESTATE.END) {
+                              if (this.myGameManager.gameState == GAMESTATE.END) {
+                                  this.missingState = GAMESTATE.END;
+                              }
+                              else {
                                   this.showTern();
                               }
                           }
                       }
                   ]).play();
                   break;
+              case GAMESTATE.RIVER_START:
+                  this.myDomManager.inviteToRiver();
+                  break;
+              case GAMESTATE.RIVER:
+                  this.myGameManager.playRiver(this.currentStep == STEP.BET ? true : false);
+                  this.myGameManager.sortCombi();
+                  this.add.timeline([
+                      {
+                          at: 100,
+                          run: () => {
+                              this.myUserView.doBet();
+                          }
+                      },
+                      {
+                          from: 1000,
+                          run: () => {
+                              this.myLeftBotView.doBet();
+                          }
+                      },
+                      {
+                          from: 1000,
+                          run: () => {
+                              this.myRightBotView.doBet();
+                          }
+                      },
+                      {
+                          from: 1000,
+                          run: () => {
+                              if (this.myGameManager.gameState == GAMESTATE.END) {
+                                  this.missingState = GAMESTATE.END;
+                              }
+                              else {
+                                  this.showRiver();
+                              }
+                          }
+                      }
+                  ]).play();
+                  break;
+              case GAMESTATE.END:
+                  this.myGameManager.getResult();
+                  this.myDomManager.showEnd();
+                  break;
+              case GAMESTATE.RESULT:
+                  this.completeGame();
+                  //this.missingState = GAMESTATE.TWO_CARD_START;
+                  //this.myGameManager.getResult();
+                  break;
+              case GAMESTATE.CONTINUE:
+                  this.myGameManager.checkLevelState();
+                  if (this.myGameManager.gameState == GAMESTATE.LEVEL_WIN ||
+                      this.myGameManager.gameState == GAMESTATE.LEVEL_LOST ||
+                      this.myGameManager.gameState == GAMESTATE.LEVEL_BEST) {
+                      this.myDomManager.showLevelEnd();
+                  }
+                  else {
+                      this.missingState = GAMESTATE.TWO_CARD_START;
+                  }
+                  break;
           }
+      }
+      completeGame() {
+          this.myGameManager.completeGame();
+          this.add.tween({
+              delay: 100,
+              targets: [this.bankTagTxt],
+              props: {
+                  scaleY: { value: 0, duration: 500, yoyo: true },
+                  text: {
+                      value: this.myGameManager.gameBank,
+                      duration: 0, delay: 500
+                  }
+              },
+              ease: 'Linear',
+              onComplete: () => {
+                  //this.setBetEnable(true);
+                  //this.setPasEnable(true);
+                  this.missingState = GAMESTATE.CONTINUE;
+              }
+          });
+          this.add.tween({
+              targets: [this.tableCards[0], this.tableCards[1], this.tableCards[2],
+                  this.tableCards[3], this.tableCards[4],],
+              props: {
+                  scaleX: { value: 0, duration: 500 },
+              },
+              ease: 'Linear',
+              onComplete: () => {
+                  this.tableCards.forEach((img) => {
+                      img.setTexture("img");
+                  });
+              }
+          });
+          this.myUserView.coins = this.myGameManager.myUser.coins;
+          this.myLeftBotView.coins = this.myGameManager.myLeftBot.coins;
+          this.myRightBotView.coins = this.myGameManager.myRightBot.coins;
+          this.myUserView.completeGame();
+          this.myLeftBotView.completeGame();
+          this.myRightBotView.completeGame();
       }
       stopGame() {
           // перебираем победителей
@@ -242633,6 +242996,7 @@ var MyGame = (function (exports) {
           this.currentStep = step;
           this.setBetEnable(false);
           this.setPasEnable(false);
+          this.setHelpEnable(false);
           switch (this.currentState) {
               case GAMESTATE.TWO_CARD_START:
                   this.missingState = GAMESTATE.TWO_CARD;
@@ -242643,51 +243007,15 @@ var MyGame = (function (exports) {
               case GAMESTATE.TERN_START:
                   this.missingState = GAMESTATE.TERN;
                   break;
+              case GAMESTATE.RIVER_START:
+                  this.missingState = GAMESTATE.RIVER;
+                  break;
           }
       }
-      /** делает кнопки ставка и пас доступными/недоступными */
-      // setBetPasEnable(enable: boolean) {
-      //     // если хотим сделать доступными кнопки ставка и пас
-      //     if (enable){
-      //         // если уже доступны, выходим
-      //         if (this.stavkaBtn.state == 1) return;
-      //         this.stavkaBtnCM.reset();
-      //         this.pasBtnCM.reset();
-      //         this.add.tween({
-      //             targets: [this.stavkaBtn, this.pasBtn],
-      //             props: {
-      //                 alpha: { value: 1, duration: 500 }
-      //             },
-      //             //delay:1000,
-      //             ease: 'Linear',
-      //             onComplete: () => {
-      //                 this.stavkaBtn.setState(1);
-      //                 this.pasBtn.setState(1);
-      //             }
-      //         })
-      //     }
-      //     // если хотим сделать недоступными
-      //     else{
-      //         // если уже недоступны, просто выходим
-      //         if(this.stavkaBtn.state == 0) return;
-      //         this.stavkaBtn.setState(0);
-      //         this.pasBtn.setState(0);
-      //         this.add.tween({
-      //             targets: [this.stavkaBtn, this.pasBtn],
-      //             props: {
-      //                 alpha: { value: 0.1, duration: 500 }
-      //             },
-      //             //delay:1000,
-      //             ease: 'Linear',
-      //             onComplete: () => {
-      //                 this.stavkaBtnCM.blackWhite();
-      //                 this.pasBtnCM.blackWhite();
-      //             }
-      //         })
-      //     }
-      // }
       /** делает кнопку ставка доступной/недоступной */
       setBetEnable(enable) {
+          if (enable && this.myGameManager.myUser.coins <= 0)
+              return;
           // если хотим сделать доступными кнопки ставка и пас
           if (enable) {
               // если уже доступны, выходим
@@ -242789,49 +243117,11 @@ var MyGame = (function (exports) {
                   duration: 300,
                   onComplete: () => {
                       this.helpBtnCM.blackWhite();
+                      this.helpBtn.setState(0);
                   }
               });
           }
       }
-      /** вызывается если все игроки платежеспособны и можно начать игру */
-      // showDomPlay(){
-      //     let str = `<div class="flexContainer">
-      //         <div id="btnDiv"  name="doPlay"><button id="btnPlay" name="doPlay">
-      //         <span class="playTxt" name="doPlay">ИГРАТЬ</span></button></div>
-      //             <div class="listDiv">
-      //                 <ul class ="ulEl">
-      //                     <li>ВЫ: ` + this.playersDataArr[0].money + ` монет</li>
-      //                     <li>ОСЁЛ: ` + this.playersDataArr[1].money + ` монет</li>
-      //                     <li>ХРЮША: ` + this.playersDataArr[2].money + ` монет</li>
-      //                 </ul>
-      //             </div>
-      //         </div>`;
-      //     this.domElement.setHTML(str);
-      //     this.domElement.addListener('click');
-      //     this.domElement.on('click', (evt) => {
-      //         if(evt.target.attributes.name && 
-      //             evt.target.attributes.name.value == "doPlay"){
-      //             this.domElement.removeAllListeners('click');
-      //             this.tweens.add({
-      //                 targets: this.domElement,
-      //                 y: -300,
-      //                 duration: 2000,
-      //                 ease: 'Sine.easeInOut',
-      //                 loop: 0,
-      //                 onComplete: () => {
-      //                     this.startGame();
-      //                 }
-      //             });
-      //         }
-      //     });
-      //     this.tweens.add({
-      //         targets: this.domElement,
-      //         y: 300,
-      //         duration: 2000,
-      //         ease: 'Sine.easeInOut',
-      //         loop: 0,
-      //     });
-      // }
       /** вызывается если все игроки платежеспособны и можно начать игру */
       showDomGameOver() {
           let str = `<div class="flexContainer">
@@ -242916,15 +243206,20 @@ var MyGame = (function (exports) {
               },
               { from: 1000,
                   run: () => {
-                      this.missingState = GAMESTATE.FLOP_START;
+                      if (this.myGameManager.gameState == GAMESTATE.END) {
+                          this.missingState = GAMESTATE.END;
+                      }
+                      else {
+                          this.missingState = GAMESTATE.FLOP_START;
+                      }
                   }
               }
           ]).play();
       }
       showFlop() {
           this.tableCards[0].setTexture("card" + this.myGameManager.myTableArr[0]).setScale(0, 1);
-          this.tableCards[1] = this.add.image(this.tableCards[0].x + 70, this.tableCards[0].y, "card" + this.myGameManager.myTableArr[1]).setScale(0, 1);
-          this.tableCards[2] = this.add.image(this.tableCards[1].x + 70, this.tableCards[1].y, "card" + this.myGameManager.myTableArr[2]).setScale(0, 1);
+          this.tableCards[1].setTexture("card" + this.myGameManager.myTableArr[1]).setScale(0, 1);
+          this.tableCards[2].setTexture("card" + this.myGameManager.myTableArr[2]).setScale(0, 1);
           this.add.timeline([
               {
                   at: 100,
@@ -242968,12 +243263,19 @@ var MyGame = (function (exports) {
               },
               {
                   from: 500,
-                  run: () => this.missingState = GAMESTATE.TERN_START
+                  run: () => {
+                      if (this.myGameManager.gameState == GAMESTATE.END) {
+                          this.missingState = GAMESTATE.END;
+                      }
+                      else {
+                          this.missingState = GAMESTATE.TERN_START;
+                      }
+                  }
               }
           ]).play();
       }
       showTern() {
-          this.tableCards[3] = this.add.image(this.tableCards[2].x + 70, this.tableCards[2].y, "card" + this.myGameManager.myTableArr[3]).setScale(0, 1);
+          this.tableCards[3].setTexture("card" + this.myGameManager.myTableArr[3]).setScale(0, 1);
           this.add.timeline([
               {
                   at: 100,
@@ -242992,7 +243294,7 @@ var MyGame = (function (exports) {
                   }
               },
               {
-                  from: 500,
+                  from: 1000,
                   run: () => {
                       this.add.tween({
                           //delay: 1000,
@@ -243004,20 +243306,76 @@ var MyGame = (function (exports) {
                   }
               },
               {
-                  from: 500,
+                  from: 1000,
                   run: () => this.myUserView.showTern()
               },
               {
-                  from: 500,
+                  from: 1000,
                   run: () => this.myLeftBotView.showTern()
               },
               {
-                  from: 500,
+                  from: 1000,
                   run: () => this.myRightBotView.showTern()
               },
               {
-                  from: 500,
-                  run: () => this.missingState = GAMESTATE.TERN_START
+                  from: 1000,
+                  run: () => {
+                      if (this.myGameManager.gameState == GAMESTATE.END) {
+                          this.missingState = GAMESTATE.END;
+                      }
+                      else {
+                          this.missingState = GAMESTATE.RIVER_START;
+                      }
+                  }
+              }
+          ]).play();
+      }
+      showRiver() {
+          this.tableCards[4].setTexture("card" + this.myGameManager.myTableArr[4]).setScale(0, 1);
+          this.add.timeline([
+              {
+                  at: 100,
+                  run: () => {
+                      this.add.tween({
+                          targets: [this.bankTagTxt],
+                          props: {
+                              scaleY: { value: 0, duration: 500, yoyo: true },
+                              text: {
+                                  value: this.myGameManager.gameBank,
+                                  duration: 0, delay: 500
+                              }
+                          },
+                          ease: 'Linear'
+                      });
+                  }
+              },
+              {
+                  from: 1000,
+                  run: () => {
+                      this.add.tween({
+                          //delay: 1000,
+                          targets: [this.tableCards[4]],
+                          props: {
+                              scaleX: { value: 1, duration: 500 }
+                          }
+                      });
+                  }
+              },
+              {
+                  from: 1000,
+                  run: () => this.myUserView.showRiver()
+              },
+              {
+                  from: 1000,
+                  run: () => this.myLeftBotView.showRiver()
+              },
+              {
+                  from: 1000,
+                  run: () => this.myRightBotView.showRiver()
+              },
+              {
+                  from: 1000,
+                  run: () => this.missingState = GAMESTATE.END
               }
           ]).play();
       }
@@ -243039,6 +243397,8 @@ var MyGame = (function (exports) {
           this.passTxt = myScene.add.text(488, 1056, "ПАС", { color: '#fff200', align: 'center',
               fontSize: "72px", fontStyle: "bold", fontFamily: "Arial, Roboto" })
               .setOrigin(0.5, 0.5).setAlpha(0);
+          this.twoCardImgArr[0] = myScene.add.image(634, 989, "empty");
+          this.twoCardImgArr[1] = myScene.add.image(702, 989, "empty");
           this.combiImgArr[0] = myScene.add.image(572, 858, "empty").setScale(0, 1);
           this.combiImgArr[1] = myScene.add.image(this.combiImgArr[0].x + 70, 858, "empty").setScale(0, 1);
           this.combiImgArr[2] = myScene.add.image(this.combiImgArr[1].x + 70, 858, "empty").setScale(0, 1);
@@ -243055,7 +243415,7 @@ var MyGame = (function (exports) {
           });
       }
       doBet() {
-          if (myScene.myGameManager.myRightBot.playerState == PLAYERSTATE.PASSED) {
+          if (myScene.myGameManager.myUser.playerState == PLAYERSTATE.PASSED) {
               if (this.combiImgArr.length == 5) {
                   myScene.add.tween({
                       targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
@@ -243106,6 +243466,50 @@ var MyGame = (function (exports) {
               // });
           }
       }
+      /** очищает от данных для начала следуей игры(розыгрыша банка) */
+      completeGame() {
+          myScene.add.tween({
+              targets: [this.tagTxt],
+              props: {
+                  scaleY: { value: 0,
+                      duration: 500, yoyo: true },
+                  text: { value: this.coins, duration: 0, delay: 500 }
+              },
+              ease: 'Linear',
+          });
+          myScene.add.tween({
+              targets: [this.twoCardImgArr[0], this.twoCardImgArr[1]],
+              props: {
+                  scaleX: { value: 0, duration: 500 }
+              },
+              ease: 'Linear',
+              onComplete: () => {
+                  this.twoCardImgArr[0].setTexture("empty");
+                  this.twoCardImgArr[1].setTexture("empty");
+                  //this.twoCardImgArr = [];
+                  this.twoCardValue = [];
+              }
+          });
+          myScene.add.tween({
+              delay: 500,
+              targets: this.passTxt,
+              alpha: 0,
+              duration: 500,
+              onComplete: () => {
+                  myScene.cowboyCM.reset();
+              }
+          });
+          myScene.add.tween({
+              targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                  this.combiImgArr[3], this.combiImgArr[4]],
+              props: { scaleX: { value: 0, duration: 500 } },
+              onComplete: () => {
+                  this.combiImgArr.forEach((img) => {
+                      img.setTexture("empty");
+                  });
+              }
+          });
+      }
       stopGame() {
       }
       getCoins() {
@@ -243114,6 +243518,8 @@ var MyGame = (function (exports) {
        *  показываем их на игровом поле
        */
       showTwoCard() {
+          if (myScene.myGameManager.myUser.playerState == PLAYERSTATE.OUTGAME)
+              return;
           this.coinImg.setAlpha(1);
           // получаем значения карт из myGameManager и заносим их в массив twoCardValue
           this.twoCardValue.push(myScene.myGameManager.myUser.twoCardArr[0]);
@@ -243126,8 +243532,10 @@ var MyGame = (function (exports) {
           //     return false;
           // });
           // показываем две карты
-          this.twoCardImgArr.push(myScene.add.image(this.twoCardCoordArr[0].x, this.twoCardCoordArr[0].y, 'card' + this.twoCardValue[0]).setScale(0, 1));
-          this.twoCardImgArr.push(myScene.add.image(this.twoCardCoordArr[1].x, this.twoCardCoordArr[1].y, 'card' + this.twoCardValue[1]).setScale(0, 1));
+          this.twoCardImgArr[0].setTexture('card' + this.twoCardValue[0]).setScale(0, 1);
+          this.twoCardImgArr[1].setTexture('card' + this.twoCardValue[1]).setScale(0, 1);
+          // this.twoCardImgArr.push(myScene.add.image(this.twoCardCoordArr[1].x,
+          //     this.twoCardCoordArr[1].y, 'card'+this.twoCardValue[1]).setScale(0,1));
           myScene.add.tween({
               targets: [this.twoCardImgArr[0], this.twoCardImgArr[1]],
               props: {
@@ -243143,6 +243551,7 @@ var MyGame = (function (exports) {
               },
               ease: 'Linear',
           });
+          this.coinImg.setPosition(278, 884);
           myScene.add.tween({
               targets: this.coinImg,
               x: { value: 778, duration: 800 },
@@ -243229,6 +243638,46 @@ var MyGame = (function (exports) {
               }
           ]).play();
       }
+      showRiver() {
+          let combiValArr = myScene.myGameManager.myUser.myCombi.combiArr;
+          // сначала скрываем карты комбинации в первом твине, в следующем твине
+          // открываем обновлённую комбинацию
+          myScene.add.timeline([
+              {
+                  at: 500,
+                  run: () => {
+                      myScene.add.tween({
+                          targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                              this.combiImgArr[3], this.combiImgArr[4]],
+                          props: {
+                              scaleX: { value: 0, duration: 500 },
+                          },
+                          ease: 'Linear',
+                          onComplete: () => {
+                              this.combiImgArr[0].setTexture("card" + combiValArr[0]);
+                              this.combiImgArr[1].setTexture("card" + combiValArr[1]);
+                              this.combiImgArr[2].setTexture("card" + combiValArr[2]);
+                              this.combiImgArr[3].setTexture("card" + combiValArr[3]);
+                              this.combiImgArr[4].setTexture("card" + combiValArr[4]);
+                          }
+                      });
+                  }
+              },
+              {
+                  from: 800,
+                  run: () => {
+                      myScene.add.tween({
+                          targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                              this.combiImgArr[3], this.combiImgArr[4]],
+                          props: {
+                              scaleX: { value: 1, duration: 500 },
+                          },
+                          ease: 'Linear',
+                      });
+                  }
+              }
+          ]).play();
+      }
   }
   class LeftBotView {
       /** аргументы - координаты двух карт, координата левой карты комбинации,
@@ -243250,7 +243699,7 @@ var MyGame = (function (exports) {
           this.coinTagImg = myScene.add.image(264, 548, "coinTag").setAlpha(0);
           this.tagTxt = myScene.add.text(264, 548, "" + this.coins, { color: '#66120a', align: 'left',
               fontSize: "60px", fontStyle: "bold" }).setOrigin(0.5, 0.5).setScale(1, 0);
-          this.passTxt = myScene.add.text(294, 266, "ПАС", { color: '#fff200', align: 'center',
+          this.passTxt = myScene.add.text(80, 266, "ПАС", { color: '#fff200', align: 'center',
               fontSize: "72px", fontStyle: "bold", fontFamily: "Arial, Roboto" })
               .setOrigin(0.5, 0.5).setAlpha(0);
           this.playerImgCM = this.playerImg.preFX.addColorMatrix();
@@ -243291,7 +243740,7 @@ var MyGame = (function (exports) {
                   }
               });
           }
-          else {
+          else if (myScene.myGameManager.myLeftBot.playerState == PLAYERSTATE.INGAME) {
               this.coins = myScene.myGameManager.myLeftBot.coins;
               //this.tagTxt.setText("" + this.coins);
               myScene.add.tween({
@@ -243310,11 +243759,56 @@ var MyGame = (function (exports) {
               });
           }
       }
+      /** очищает от данных для начала следуей игры(зозыгрыша банка) */
+      completeGame() {
+          myScene.add.tween({
+              targets: [this.tagTxt],
+              props: {
+                  scaleY: { value: 0, duration: 500, yoyo: true },
+                  text: { value: this.coins, duration: 0, delay: 500 }
+              },
+              ease: 'Linear',
+          });
+          myScene.add.tween({
+              targets: [this.twoCardImgArr[0], this.twoCardImgArr[1]],
+              props: {
+                  scaleX: { value: 0, duration: 500 }
+              },
+              ease: 'Linear',
+              onComplete: () => {
+                  this.twoCardImgArr[0].setTexture("empty");
+                  this.twoCardImgArr[1].setTexture("empty");
+                  this.twoCardImgArr = [];
+                  this.twoCardValue = [];
+              }
+          });
+          myScene.add.tween({
+              delay: 500,
+              targets: this.passTxt,
+              alpha: 0,
+              duration: 500,
+              onComplete: () => {
+                  this.playerImgCM.reset();
+              }
+          });
+          myScene.add.tween({
+              targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                  this.combiImgArr[3], this.combiImgArr[4]],
+              props: { scaleX: { value: 0, duration: 500 } },
+              onComplete: () => {
+                  this.combiImgArr.forEach((img) => {
+                      img.setTexture("empty");
+                  });
+              }
+          });
+      }
       stopGame() {
       }
       getCoins() {
       }
       showTwoCard() {
+          if (myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME)
+              return;
           this.coinImg.setAlpha(1);
           this.twoCardValue.push(myScene.myGameManager.myLeftBot.twoCardArr[0]);
           this.twoCardValue.push(myScene.myGameManager.myLeftBot.twoCardArr[1]);
@@ -243342,6 +243836,7 @@ var MyGame = (function (exports) {
               },
               ease: 'Linear',
           });
+          this.coinImg.setPosition(264, 548);
           myScene.add.tween({
               targets: this.coinImg,
               x: { value: 778, duration: 800 },
@@ -243349,22 +243844,8 @@ var MyGame = (function (exports) {
           });
       }
       showFlop() {
-          // this.coins = myScene.myGameManager.myLeftBot.coins;
-          // this.tagTxt.setText("" + this.coins);
-          // myScene.add.tween({
-          //     targets: [this.tagTxt],
-          //     props: {
-          //         scaleY: { value: 0, duration: 500, yoyo: true },
-          //         text: { value: this.coins, duration: 0, delay: 500 }
-          //     },
-          //     ease: 'Linear',
-          // })
-          // this.coinImg.setPosition(264, 548);
-          // myScene.add.tween({
-          //     targets: this.coinImg,
-          //     x: { value: 778, duration: 800 },
-          //     y: { value: 680, duration: 800 }
-          // });
+          if (myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME)
+              return;
           let combiValArr = myScene.myGameManager.myLeftBot.myCombi.combiArr;
           // this.combiImgArr[0] = myScene.add.image(32,126, "card" + combiValArr[0]). 
           //     setScale(0,1);
@@ -243389,6 +243870,50 @@ var MyGame = (function (exports) {
           });
       }
       showTern() {
+          if (myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME)
+              return;
+          let combiValArr = myScene.myGameManager.myLeftBot.myCombi.combiArr;
+          // сначала скрываем карты комбинации в первом твине, в следующем твине
+          // открываем обновлённую комбинацию
+          myScene.add.timeline([
+              {
+                  at: 500,
+                  run: () => {
+                      myScene.add.tween({
+                          targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                              this.combiImgArr[3], this.combiImgArr[4]],
+                          props: {
+                              scaleX: { value: 0, duration: 500 },
+                          },
+                          ease: 'Linear',
+                          onComplete: () => {
+                              this.combiImgArr[0].setTexture("card" + combiValArr[0]);
+                              this.combiImgArr[1].setTexture("card" + combiValArr[1]);
+                              this.combiImgArr[2].setTexture("card" + combiValArr[2]);
+                              this.combiImgArr[3].setTexture("card" + combiValArr[3]);
+                              this.combiImgArr[4].setTexture("card" + combiValArr[4]);
+                          }
+                      });
+                  }
+              },
+              {
+                  from: 800,
+                  run: () => {
+                      myScene.add.tween({
+                          targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                              this.combiImgArr[3], this.combiImgArr[4]],
+                          props: {
+                              scaleX: { value: 1, duration: 500 },
+                          },
+                          ease: 'Linear',
+                      });
+                  }
+              }
+          ]).play();
+      }
+      showRiver() {
+          if (myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME)
+              return;
           let combiValArr = myScene.myGameManager.myLeftBot.myCombi.combiArr;
           // сначала скрываем карты комбинации в первом твине, в следующем твине
           // открываем обновлённую комбинацию
@@ -243490,7 +244015,7 @@ var MyGame = (function (exports) {
                   }
               });
           }
-          else {
+          else if (myScene.myGameManager.myRightBot.playerState == PLAYERSTATE.INGAME) {
               this.coins = myScene.myGameManager.myRightBot.coins;
               //this.tagTxt.setText("" + this.coins);
               myScene.add.tween({
@@ -243509,11 +244034,59 @@ var MyGame = (function (exports) {
               });
           }
       }
+      /** очищает от данных для начала следуей игры(розыгрыша банка),
+       * вносит изменения в количества монет
+       */
+      completeGame() {
+          myScene.add.tween({
+              targets: [this.tagTxt],
+              props: {
+                  scaleY: { value: 0,
+                      duration: 500, yoyo: true },
+                  text: { value: this.coins, duration: 0, delay: 500 }
+              },
+              ease: 'Linear',
+          });
+          myScene.add.tween({
+              targets: [this.twoCardImgArr[0], this.twoCardImgArr[1]],
+              props: {
+                  scaleX: { value: 0, duration: 500 }
+              },
+              ease: 'Linear',
+              onComplete: () => {
+                  this.twoCardImgArr[0].setTexture("empty");
+                  this.twoCardImgArr[1].setTexture("empty");
+                  this.twoCardImgArr = [];
+                  this.twoCardValue = [];
+              }
+          });
+          myScene.add.tween({
+              delay: 500,
+              targets: this.passTxt,
+              alpha: 0,
+              duration: 500,
+              onComplete: () => {
+                  this.playerImgCM.reset();
+              }
+          });
+          myScene.add.tween({
+              targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                  this.combiImgArr[3], this.combiImgArr[4]],
+              props: { scaleX: { value: 0, duration: 500 } },
+              onComplete: () => {
+                  this.combiImgArr.forEach((img) => {
+                      img.setTexture("empty");
+                  });
+              }
+          });
+      }
       stopGame() {
       }
       getCoins() {
       }
       showTwoCard() {
+          if (myScene.myGameManager.myRightBot.playerState == PLAYERSTATE.OUTGAME)
+              return;
           this.coinImg.setAlpha(1);
           this.twoCardValue.push(myScene.myGameManager.myRightBot.twoCardArr[0]);
           this.twoCardValue.push(myScene.myGameManager.myRightBot.twoCardArr[1]);
@@ -243542,6 +244115,7 @@ var MyGame = (function (exports) {
               ease: 'Linear'
           });
           //654,520
+          this.coinImg.setPosition(654, 520);
           myScene.add.tween({
               targets: this.coinImg,
               x: { value: 778, duration: 800 },
@@ -243549,6 +244123,8 @@ var MyGame = (function (exports) {
           });
       }
       showFlop() {
+          if (myScene.myGameManager.myRightBot.playerState != PLAYERSTATE.INGAME)
+              return;
           // this.coins = myScene.myGameManager.myRightBot.coins;
           // this.tagTxt.setText("" + this.coins);
           // myScene.add.tween({
@@ -243566,16 +244142,6 @@ var MyGame = (function (exports) {
           //     y:{value:680, duration:800}
           // });
           let combiValArr = myScene.myGameManager.myRightBot.myCombi.combiArr;
-          // this.combiImgArr[0] = myScene.add.image(566,158, "card" + combiValArr[0]). 
-          //     setScale(0,1);
-          // this.combiImgArr[1] = myScene.add.image(this.combiImgArr[0].x + 70,158,
-          //     "card" + combiValArr[1]).setScale(0,1);
-          // this.combiImgArr[2] = myScene.add.image(this.combiImgArr[1].x + 70,158,
-          //     "card" + combiValArr[2]).setScale(0,1);
-          // this.combiImgArr[3] = myScene.add.image(this.combiImgArr[2].x + 70,158,
-          //     "card" + combiValArr[3]).setScale(0,1);
-          // this.combiImgArr[4] = myScene.add.image(this.combiImgArr[3].x + 70,158,
-          //     "card" + combiValArr[4]).setScale(0,1);
           this.combiImgArr[0].setTexture("card" + combiValArr[0]);
           this.combiImgArr[1].setTexture("card" + combiValArr[1]);
           this.combiImgArr[2].setTexture("card" + combiValArr[2]);
@@ -243589,6 +244155,50 @@ var MyGame = (function (exports) {
           });
       }
       showTern() {
+          if (myScene.myGameManager.myRightBot.playerState != PLAYERSTATE.INGAME)
+              return;
+          let combiValArr = myScene.myGameManager.myRightBot.myCombi.combiArr;
+          // сначала скрываем карты комбинации в первом твине, в следующем твине
+          // открываем обновлённую комбинацию
+          myScene.add.timeline([
+              {
+                  at: 500,
+                  run: () => {
+                      myScene.add.tween({
+                          targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                              this.combiImgArr[3], this.combiImgArr[4]],
+                          props: {
+                              scaleX: { value: 0, duration: 500 },
+                          },
+                          ease: 'Linear',
+                          onComplete: () => {
+                              this.combiImgArr[0].setTexture("card" + combiValArr[0]);
+                              this.combiImgArr[1].setTexture("card" + combiValArr[1]);
+                              this.combiImgArr[2].setTexture("card" + combiValArr[2]);
+                              this.combiImgArr[3].setTexture("card" + combiValArr[3]);
+                              this.combiImgArr[4].setTexture("card" + combiValArr[4]);
+                          }
+                      });
+                  }
+              },
+              {
+                  from: 800,
+                  run: () => {
+                      myScene.add.tween({
+                          targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                              this.combiImgArr[3], this.combiImgArr[4]],
+                          props: {
+                              scaleX: { value: 1, duration: 500 },
+                          },
+                          ease: 'Linear',
+                      });
+                  }
+              }
+          ]).play();
+      }
+      showRiver() {
+          if (myScene.myGameManager.myRightBot.playerState != PLAYERSTATE.INGAME)
+              return;
           let combiValArr = myScene.myGameManager.myRightBot.myCombi.combiArr;
           // сначала скрываем карты комбинации в первом твине, в следующем твине
           // открываем обновлённую комбинацию
@@ -243631,7 +244241,8 @@ var MyGame = (function (exports) {
   }
   class DomManager {
       constructor() {
-          this.namesLst = { "user": "У Вас", "leftBot": "У Ослика", "rightBot": "У Хрюши" };
+          this.namesLst = { "user": "У Вас", "leftBot": "У Ослика", "rightBot": "У Хрюши",
+              "oslik": "У Ослика", "piggi": "У Хрюши" };
           this.combiNames = ["Старшая карта", "Пара", "Две пары", "Стрит", "Тройка",
               "Фулл Хаус", "Флеш", "Каре", "Стрит Флеш", "Роял Флеш"];
           this.combiList = //`<div class="listDiv">
@@ -243664,26 +244275,68 @@ var MyGame = (function (exports) {
             Straight Flush
             Royal Flush`;
       }
+      /** вызывается при нажатии "?" */
+      showHelp() {
+          myScene.setHelpEnable(false);
+          myScene.setBetEnable(false);
+          myScene.setPasEnable(false);
+          let str = `<div class="flexContainer">
+            <div id="btnDiv"  name="doPlay"><button id="btnPlay" name="doPlay">
+            <span class="playTxt" name="doPlaySpan">ЗАКРЫТЬ</span></button></div>`;
+          str = str + `<div class="listDiv"><p id="spoil"> *Текст можно прокрутить! </p>` +
+              this.contextStr + this.combiList + `</div></div>`;
+          myScene.domElement.setHTML(str);
+          myScene.domElement.addListener('click');
+          myScene.domElement.on('click', (evt) => {
+              if ((document.getElementById("btnDiv").contains(evt.target) ||
+                  evt.target.id == "doPlaySpan")) {
+                  myScene.domElement.removeAllListeners('click');
+                  myScene.tweens.add({
+                      targets: myScene.domElement,
+                      y: -600,
+                      duration: 1000,
+                      ease: 'Sine.easeInOut',
+                      loop: 0,
+                      onComplete: () => {
+                          //if(myScene.missingState != GAMESTATE.TWO_CARD_START)
+                          myScene.setHelpEnable(true);
+                          myScene.setBetEnable(true);
+                          if (myScene.missingState != GAMESTATE.TWO_CARD_START)
+                              myScene.setPasEnable(true);
+                      }
+                  });
+              }
+          });
+          myScene.tweens.add({
+              targets: myScene.domElement,
+              y: 600,
+              duration: 1000,
+              ease: 'Sine.easeInOut',
+              loop: 0,
+          });
+      }
       /** первое приглашение в игру после загрузки приложения */
       inviteToApp() {
           // если данных об игроке нет, играем первый уровень
           if (globalThis.levelsData.length == 0 ||
               globalThis.levelsData[0].levelState != LEVELSTATE.COMPLETED) {
-              globalThis.numLevel = 1;
+              globalThis.numLevel = 2;
           }
+          this.contextStr = `Вы на первом уровне. Ваши соперники Ослик и Хрюша. Их стратегии
+            просты: Ослик
+            делает ставки всегда пока есть монеты, Хрюша всё повторяет
+            за Вами - и ставку и пас. Используйте в игре кнопки "Пас" и
+            "Ставка".  Для получения информации жмите кнопку "?".
+            <p  >
+                Игра начинается со ставки перед игрой, после чего сдаётся
+                по две карты. Ставка фиксирована - 10 монет.
+            </p>`;
           let str = `<div class="flexContainer">
             <div id="btnDiv"  name="doPlay"><button id="btnPlay" name="doPlay">
             <span class="playTxt" name="doPlaySpan">ИГРАТЬ</span></button></div>
                 <div class="listDiv">
-                <p id="spoil"> *Текст можно прокрутить! </p>
-                    Вы на первом уровне. Ваши соперники Ослик и Хрюша. Ослик
-                    делает ставки всегда пока есть монеты, Хрюша всё повторяет
-                    за Вами - и ставку и пас. Используйте в игре кнопки "Пас" и
-                    "Ставка".  Для получения информации жмите кнопку "?".
-                    <p  >
-                        Игра начинается с взноса перед игрой, после чего сдаётся
-                        по две карты.
-                    </p>` +
+                <p id="spoil"> *Текст можно прокрутить! </p>` +
+              this.contextStr +
               this.combiList +
               `</div>
             </div>`;
@@ -243717,20 +244370,18 @@ var MyGame = (function (exports) {
        * чтобы начать игру
        */
       inviteToTwoCard() {
-          let str;
           if (globalThis.numLevel == 1) {
-              str = `<div class="flexContainer">
-                <div class="listDiv">
-                    <p style="text-align: center;">Сделайте ставку (кнопка "Ставка"),
+              this.contextStr = `
+                <p style="text-align: center;">Сделайте ставку (кнопка "Ставка"),
                      чтобы начать игру.</p>
                     <ul class ="ulEl">
                         <li>У Вас ` + myScene.myUserView.coins + ` монет.</li>
                         <li>У Ослика ` + myScene.myLeftBotView.coins + ` монет. </li>
                         <li>У Хрюши ` + myScene.myRightBotView.coins + ` монет.</li>
-                    </ul>
-                </div>
-            </div> `;
+                    </ul>`;
           }
+          let str = `<div class="flexContainer"><div class="listDiv">` +
+              this.contextStr + '</div></div>';
           myScene.domElement.setHTML(str);
           myScene.add.timeline([
               {
@@ -243761,33 +244412,35 @@ var MyGame = (function (exports) {
                   from: 1000,
                   run: () => {
                       myScene.setBetEnable(true);
-                      myScene.setPasEnable(true);
+                      myScene.setPasEnable(false);
                       myScene.setHelpEnable(true);
                   }
               }
           ]).play();
       }
+      getActivePlayers() {
+          let str = "";
+          myScene.myGameManager.playersInGame.forEach((plr) => {
+              str = str + `<li>` + this.namesLst[plr.name] + `: ` +
+                  this.combiNames[plr.myCombi.combiName] + `</li>`;
+          });
+          return str;
+      }
+      /**роздано по две карты каждому игроку предлагается сделать ставку
+       * или пасовать, чтобы продолжить игру, начать играть флоп
+       */
       inviteToFlop() {
-          let row1 = `<li>` + this.namesLst[myScene.myGameManager.playersCombiArr[0].player] +
-              `: ` + this.combiNames[myScene.myGameManager.playersCombiArr[0].combi.combiName] +
-              `</li>`;
-          let row2 = `<li>` + this.namesLst[myScene.myGameManager.playersCombiArr[1].player] +
-              `: ` + this.combiNames[myScene.myGameManager.playersCombiArr[1].combi.combiName] +
-              `</li>`;
-          let row3 = `<li>` + this.namesLst[myScene.myGameManager.playersCombiArr[2].player] +
-              `: ` + this.combiNames[myScene.myGameManager.playersCombiArr[2].combi.combiName] +
-              `</li>`;
-          let str = `<div class="flexContainer">
-                <div class="listDiv">
-                    <ul class ="ulEl">` +
-              row1 + row2 + row3 +
+          this.contextStr = `
+            <ul class ="ulEl">` +
+              this.getActivePlayers() +
               `</ul>
-                    <p style="text-align: center;">Следующая стадия - Флоп. 
-                     На столе открываются три карты и из этих трёх карт и двух
-                     карт каждого игрока составляются комбинации. Вы должны сделать
-                     выбор - "ПАС" или "СТАВКА".</p>
-                    </div>
-                </div> `;
+            <p style="text-align: center;">Следующая стадия - Флоп. 
+            На столе открываются три карты и из этих трёх карт и двух
+            карт каждого игрока составляются комбинации. Вы должны сделать
+            выбор - "ПАС" или "СТАВКА".</p>`;
+          let str = `<div class="flexContainer"><div class="listDiv">` +
+              this.contextStr +
+              `</div></div> `;
           myScene.domElement.setHTML(str);
           myScene.add.timeline([
               {
@@ -243824,26 +244477,20 @@ var MyGame = (function (exports) {
               }
           ]).play();
       }
+      /**открыты три карты, предлагается сделать ставку
+       * или пасовать, чтобы продолжить игру, играть терн
+       */
       inviteToTern() {
-          let row1 = `<li>` + this.namesLst[myScene.myGameManager.playersCombiArr[0].player] +
-              `: ` + this.combiNames[myScene.myGameManager.playersCombiArr[0].combi.combiName] +
-              `</li>`;
-          let row2 = `<li>` + this.namesLst[myScene.myGameManager.playersCombiArr[1].player] +
-              `: ` + this.combiNames[myScene.myGameManager.playersCombiArr[1].combi.combiName] +
-              `</li>`;
-          let row3 = `<li>` + this.namesLst[myScene.myGameManager.playersCombiArr[2].player] +
-              `: ` + this.combiNames[myScene.myGameManager.playersCombiArr[2].combi.combiName] +
-              `</li>`;
-          let str = `<div class="flexContainer">
-            <div class="listDiv">
-                <ul class ="ulEl">` +
-              row1 + row2 + row3 +
+          this.contextStr = `<ul class ="ulEl">` +
+              this.getActivePlayers() +
               `</ul>
                 <p style="text-align: center;">Следующая стадия - Терн. 
-                 Будет открыта ещё одна карта, которую можно будет добавить
-                 в комбинацию. За Вами выбор - "ПАС" или "СТАВКА".</p>
-                </div>
-            </div> `;
+                Будет открыта ещё одна карта, которую можно будет добавить
+                в комбинацию. За Вами выбор - "ПАС" или "СТАВКА".</p>
+            `;
+          let str = `<div class="flexContainer"><div class="listDiv">` +
+              this.contextStr +
+              `</div></div> `;
           myScene.domElement.setHTML(str);
           myScene.add.timeline([
               {
@@ -243878,6 +244525,188 @@ var MyGame = (function (exports) {
                       myScene.setHelpEnable(true);
                   }
               }
+          ]).play();
+      }
+      /**открыта четвёртая карта, предлагается сделать ставку
+       * или пасовать, чтобы продолжить игру, играть ривер
+       */
+      inviteToRiver() {
+          this.contextStr = `<div class="listDiv">
+            <ul class ="ulEl">` +
+              this.getActivePlayers() +
+              `</ul>
+            <p style="text-align: center;">Следующая стадия - Ривер. 
+             Будет открыта ещё одна карта, которую можно будет добавить
+             в комбинацию. За Вами выбор - "ПАС" или "СТАВКА".</p>
+            </div>`;
+          let str = `<div class="flexContainer">`
+              + this.contextStr +
+              `</div> `;
+          myScene.domElement.setHTML(str);
+          myScene.add.timeline([
+              {
+                  at: 1000,
+                  run: () => {
+                      myScene.tweens.add({
+                          targets: myScene.domElement,
+                          y: 900,
+                          duration: 1000,
+                          ease: 'Sine.easeInOut',
+                          loop: 0
+                      });
+                  }
+              },
+              {
+                  from: 3500,
+                  run: () => {
+                      myScene.tweens.add({
+                          targets: myScene.domElement,
+                          y: -600,
+                          duration: 1000,
+                          ease: 'Sine.easeInOut',
+                          loop: 0
+                      });
+                  }
+              },
+              {
+                  from: 1000,
+                  run: () => {
+                      myScene.setBetEnable(true);
+                      myScene.setPasEnable(true);
+                      myScene.setHelpEnable(true);
+                  }
+              }
+          ]).play();
+      }
+      /** вызывается при окончании розыгрыша, информирует об окончании игры */
+      showEnd() {
+          if (myScene.bankTagTxt.text != (myScene.myGameManager.gameBank + "")) {
+              myScene.add.tween({
+                  delay: 100,
+                  targets: [myScene.bankTagTxt],
+                  props: {
+                      scaleY: { value: 0, duration: 500, yoyo: true },
+                      text: {
+                          value: myScene.myGameManager.gameBank,
+                          duration: 0, delay: 500
+                      }
+                  },
+                  ease: 'Linear',
+              });
+          }
+          let str = "";
+          myScene.myGameManager.playersInGame.forEach((plr) => {
+              str = str + `<li>` + this.namesLst[plr.name] + `: ` +
+                  this.combiNames[plr.myCombi.combiName] + `</li>`;
+          });
+          let winStr = "";
+          myScene.myGameManager.winnersPlayers.forEach((plr) => {
+              winStr = winStr + `<li>` + this.namesLst[plr.name] + `: ` +
+                  this.combiNames[plr.myCombi.combiName] + `</li>`;
+          });
+          winStr = `<ul class ="ulEl">` +
+              winStr +
+              `</ul>
+                <hr style = "border-width:5px">
+                    <p style="text-align: center;">Розыгрыш закончен. 
+                     </p>`;
+          str = `<div class="flexContainer">
+            <div class="listDiv">
+                <ul class ="ulEl">` +
+              str +
+              `</ul>
+            <hr style = "border-width:5px">
+                <p style="text-align: center;">Банк разделили. 
+                 </p>` +
+              winStr +
+              `</div></div> `;
+          myScene.domElement.setHTML(str);
+          myScene.add.timeline([
+              {
+                  at: 1000,
+                  run: () => {
+                      myScene.tweens.add({
+                          targets: myScene.domElement,
+                          y: 900,
+                          duration: 1000,
+                          ease: 'Sine.easeInOut',
+                          loop: 0
+                      });
+                  }
+              },
+              {
+                  from: 3500,
+                  run: () => {
+                      myScene.tweens.add({
+                          targets: myScene.domElement,
+                          y: -600,
+                          duration: 1000,
+                          ease: 'Sine.easeInOut',
+                          loop: 0,
+                          onComplete: () => {
+                              myScene.missingState = GAMESTATE.RESULT;
+                          }
+                      });
+                  }
+              },
+              // {
+              //     from: 1000,
+              //     run: () => {
+              //         myScene.contBtn.setTexture("continueBtn0").setScale(0);
+              //         myScene.add.tween({
+              //             targets:myScene.contBtn,
+              //             scale:1,
+              //             duration:500,
+              //             ease: 'Sine.easeInOut',
+              //             onComplete: () => {
+              //                 myScene.contBtn.setInteractive();
+              //             }
+              //         })
+              //     }
+              // },
+              // {
+              //     from: 1000,
+              //     run: () => {
+              //         myScene.missingState = GAMESTATE.RESULT;
+              //     }
+              // }
+          ]).play();
+      }
+      /** вызывается если завершено прохождение уровня */
+      showLevelEnd() {
+          let str = "";
+          str = `<div class="flexContainer">` +
+              `<p>Уровень завершён</p>` +
+              `</div> `;
+          myScene.domElement.setHTML(str);
+          myScene.add.timeline([
+              {
+                  at: 1000,
+                  run: () => {
+                      myScene.tweens.add({
+                          targets: myScene.domElement,
+                          y: 900,
+                          duration: 1000,
+                          ease: 'Sine.easeInOut',
+                          loop: 0
+                      });
+                  }
+              },
+              {
+                  from: 3500,
+                  run: () => {
+                      myScene.tweens.add({
+                          targets: myScene.domElement,
+                          y: -600,
+                          duration: 1000,
+                          ease: 'Sine.easeInOut',
+                          loop: 0,
+                          onComplete: () => {
+                              myScene.missingState = GAMESTATE.RESULT;
+                          }
+                      });
+                  }
+              },
           ]).play();
       }
   }

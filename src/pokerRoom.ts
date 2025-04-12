@@ -7,6 +7,7 @@ import { text } from "stream/consumers";
 enum COMBINATION  {BIGGEST_CARD, PAIR, TWO_PAIR, STREET, TRIPLE,
     FULL_HOUSE, FLASH, CARE, STREET_FLASH, ROYAL_FLASH };
 enum STEP {BET, PASS};
+
 /** обозначает стадию игры: APP_START - приложение только запустилось, необходимо
  *  выяснить достижения игрока в предыдущих сеансах, предложить ему варианты -
  *  продолжить с последнего уровня или заново пройти уже пройденные уровни,
@@ -14,7 +15,8 @@ enum STEP {BET, PASS};
  *  монеты всем игрокам, стадии игры missingState присваивается значение TWO_CARD_START 
   */
 enum GAMESTATE {APP_START, GAME_START, TWO_CARD_START, TWO_CARD, FLOP_START,
-      FLOP,TERN_START, TERN, RIVER, END};
+      FLOP,TERN_START, TERN, RIVER_START, RIVER, END, RESULT, CONTINUE,
+      LEVEL_WIN, LEVEL_LOST, LEVEL_BEST};
 
 enum PLAYERSTATE {INGAME, PASSED, OUTGAME};
 type playersData = {"name":string, "money":number};
@@ -58,6 +60,9 @@ interface IPlayerView{
     /** изображает ставку или пас */
     doBet();
 
+    /** очищает от данных для начала следуей игры(розыгрыша банка) */
+    completeGame();
+
     /** заканчивает игру, получает выигрыш в случае победы */
     stopGame():void;
 
@@ -75,6 +80,8 @@ interface IPlayerView{
 
     /** играем терн - пасуем или ставим, ищем комбинации */
     showTern():void
+
+    showRiver():void
 }
 
 /** это класс для визуального отображения хода игры, сами же игровые
@@ -110,9 +117,9 @@ export class PokerRoom extends Phaser.Scene
     myRightBotView:IPlayerView;
 
     /** текст надписей (количество монет) на бирках игроков и банка */
-    usrTagTxt:Phaser.GameObjects.Text;
-    oslTagTxt:Phaser.GameObjects.Text;
-    khrTagTxt:Phaser.GameObjects.Text;
+    // usrTagTxt:Phaser.GameObjects.Text;
+    // oslTagTxt:Phaser.GameObjects.Text;
+    // khrTagTxt:Phaser.GameObjects.Text;
     bankTagTxt:Phaser.GameObjects.Text;
 
     /**прикуп - карты на столе */
@@ -134,6 +141,8 @@ export class PokerRoom extends Phaser.Scene
     // myLeftBotCM:Phaser.FX.ColorMatrix;
     // myRightBot:Phaser.FX.ColorMatrix;
 
+    contBtn:Phaser.GameObjects.Image;
+
     myDomManager:DomManager;
 
     currentStep:STEP;
@@ -141,8 +150,8 @@ export class PokerRoom extends Phaser.Scene
     constructor(){
         super("pokerRoom");
 
-        this.playersDataArr = [{"name":"user", "money":100},
-        {"name":"oslik", "money":100},{"name":"khrusha", "money":100}];
+        this.playersDataArr = [{"name":"user", "money":200},
+        {"name":"oslik", "money":200},{"name":"khrusha", "money":200}];
 
         this.gameState = GAMESTATE.APP_START;
         this.prevState = GAMESTATE.APP_START;
@@ -189,6 +198,7 @@ export class PokerRoom extends Phaser.Scene
         this.load.image('coins',"coins.png");
         this.load.image('helpBtn',"help.png");
         this.load.image('coin',"coin.png");
+        this.load.image('continueBtn0','continueBtn0.png');
 
         for(let i = 0; i<36; i++){
             this.load.image(("card"+i), ("card"+i + ".png"));
@@ -239,7 +249,7 @@ export class PokerRoom extends Phaser.Scene
 
         this.helpBtn.on('pointerdown', () => {
             if(this.helpBtn.state == 0) return;
-
+            this.myDomManager.showHelp();
             
         })
 
@@ -292,6 +302,25 @@ export class PokerRoom extends Phaser.Scene
         // }
 
         this.tableCards[0] = this.add.image(168,700,"empty")//.setDepth(2);
+        this.tableCards[1] = this.add.image(this.tableCards[0].x + 70,700,"empty");
+        this.tableCards[2] = this.add.image(this.tableCards[1].x + 70,700,"empty");
+        this.tableCards[3] = this.add.image(this.tableCards[2].x + 70,700,"empty");
+        this.tableCards[4] = this.add.image(this.tableCards[3].x + 70,700,"empty");
+
+        //this.add.image(450,1150, 'continueBtn0');
+        this.contBtn = this.add.image(450,1150, 'empty');
+
+        this.contBtn.on('pointerdown', () => {
+            this.contBtn.disableInteractive();
+            this.add.tween({
+                targets: this.contBtn,
+                scale: 0,
+                duration:500,
+                onComplete: () => {
+                    this.missingState = GAMESTATE.RESULT;
+                }
+            })
+        })
         
         this.prepareApp();
     }
@@ -324,9 +353,9 @@ export class PokerRoom extends Phaser.Scene
                 this.myUserView = new UserView(this.myGameManager.myUser.name,
                     this.myGameManager.myUser.coins);
                 this.myLeftBotView = new LeftBotView(this.myGameManager.myLeftBot.name,
-                    this.myGameManager.myUser.coins);
+                    this.myGameManager.myLeftBot.coins);
                 this.myRightBotView = new RightBotView(this.myGameManager.myRightBot.name,
-                    this.myGameManager.myUser.coins);
+                    this.myGameManager.myRightBot.coins);
                 
                 this.cowboyCM.reset();
                 break;
@@ -334,6 +363,7 @@ export class PokerRoom extends Phaser.Scene
                 this.myDomManager.inviteToTwoCard();
                 break;
             case GAMESTATE.TWO_CARD:
+                this.myGameManager.gameState = GAMESTATE.TWO_CARD_START;
                 this.myGameManager.setTwoCard();
                 this.myGameManager.sortCombi();
                 this.showTwoCard();
@@ -366,7 +396,9 @@ export class PokerRoom extends Phaser.Scene
                     {
                         from:1000,
                         run: () => {
-                            if(this.myGameManager.gameState != GAMESTATE.END){
+                            if(this.myGameManager.gameState == GAMESTATE.END){
+                                this.missingState = GAMESTATE.END;
+                            }else{
                                 this.showFlop();
                             }
                         }
@@ -401,14 +433,117 @@ export class PokerRoom extends Phaser.Scene
                     {
                         from:1000,
                         run: () => {
-                            if(this.myGameManager.gameState != GAMESTATE.END){
+                            if(this.myGameManager.gameState == GAMESTATE.END){
+                                this.missingState = GAMESTATE.END;
+                            }else{
                                 this.showTern();
                             }
                         }
                     }
                 ]).play();
                 break;
+            case GAMESTATE.RIVER_START:
+                this.myDomManager.inviteToRiver();
+                break;
+            case GAMESTATE.RIVER:
+                this.myGameManager.playRiver(this.currentStep == STEP.BET? true:false);
+                this.myGameManager.sortCombi();
+                this.add.timeline([
+                    {
+                        at: 100,
+                        run: () => {
+                            this.myUserView.doBet();
+                        }
+                    },
+                    {
+                        from:1000,
+                        run: () => {
+                            this.myLeftBotView.doBet();
+                        }
+                    },
+                    {
+                        from: 1000,
+                        run: () => {
+                            this.myRightBotView.doBet();
+                        }
+                    },
+                    {
+                        from:1000,
+                        run: () => {
+                            if(this.myGameManager.gameState == GAMESTATE.END){
+                                this.missingState = GAMESTATE.END;
+                            }else{
+                                this.showRiver();
+                            }
+                        }
+                    }
+                ]).play();
+                break;
+            case GAMESTATE.END:
+                this.myGameManager.getResult();
+                this.myDomManager.showEnd();
+                break;
+            case GAMESTATE.RESULT:
+                this.completeGame();
+
+                //this.missingState = GAMESTATE.TWO_CARD_START;
+                //this.myGameManager.getResult();
+                break;
+            case GAMESTATE.CONTINUE:
+                this.myGameManager.checkLevelState();
+                if(this.myGameManager.gameState == GAMESTATE.LEVEL_WIN ||
+                    this.myGameManager.gameState == GAMESTATE.LEVEL_LOST ||
+                    this.myGameManager.gameState == GAMESTATE.LEVEL_BEST){
+                        this.myDomManager.showLevelEnd();
+                    }else{
+                        this.missingState = GAMESTATE.TWO_CARD_START;
+                    }
+                break;
         }
+    }
+
+    completeGame(){
+        this.myGameManager.completeGame();
+
+        this.add.tween({
+            delay:100,
+            targets: [this.bankTagTxt],
+            props: {
+                scaleY: { value: 0, duration: 500, yoyo: true },
+                text: {
+                    value: this.myGameManager.gameBank,
+                    duration: 0, delay: 500
+                }
+            },
+            ease: 'Linear',
+            onComplete: () => {
+                //this.setBetEnable(true);
+                //this.setPasEnable(true);
+                this.missingState = GAMESTATE.CONTINUE;
+            }
+        })
+
+        this.add.tween({
+            targets: [this.tableCards[0], this.tableCards[1], this.tableCards[2],
+                        this.tableCards[3], this.tableCards[4],],
+            props: {
+                scaleX: { value: 0, duration: 500 },
+            },
+            ease: 'Linear',
+            onComplete: () => {
+                this.tableCards.forEach((img) => {
+                    img.setTexture("img");
+                })
+            }
+        })
+
+        this.myUserView.coins = this.myGameManager.myUser.coins;
+        this.myLeftBotView.coins = this.myGameManager.myLeftBot.coins;
+        this.myRightBotView.coins = this.myGameManager.myRightBot.coins;
+
+        this.myUserView.completeGame();
+        this.myLeftBotView.completeGame();
+        this.myRightBotView.completeGame();
     }
 
     stopGame(){
@@ -446,6 +581,8 @@ export class PokerRoom extends Phaser.Scene
         this.currentStep = step;
         this.setBetEnable(false);
         this.setPasEnable(false);
+        this.setHelpEnable(false);
+
         switch(this.currentState){
             case GAMESTATE.TWO_CARD_START:
                 this.missingState = GAMESTATE.TWO_CARD;
@@ -456,57 +593,16 @@ export class PokerRoom extends Phaser.Scene
             case GAMESTATE.TERN_START:
                 this.missingState = GAMESTATE.TERN;
                 break;
+            case GAMESTATE.RIVER_START:
+                this.missingState = GAMESTATE.RIVER;
+                break;
         }
     }
 
-    /** делает кнопки ставка и пас доступными/недоступными */
-    // setBetPasEnable(enable: boolean) {
-    //     // если хотим сделать доступными кнопки ставка и пас
-    //     if (enable){
-    //         // если уже доступны, выходим
-    //         if (this.stavkaBtn.state == 1) return;
-
-    //         this.stavkaBtnCM.reset();
-    //         this.pasBtnCM.reset();
-
-    //         this.add.tween({
-    //             targets: [this.stavkaBtn, this.pasBtn],
-    //             props: {
-    //                 alpha: { value: 1, duration: 500 }
-    //             },
-    //             //delay:1000,
-    //             ease: 'Linear',
-    //             onComplete: () => {
-    //                 this.stavkaBtn.setState(1);
-    //                 this.pasBtn.setState(1);
-    //             }
-    //         })
-    //     }
-    //     // если хотим сделать недоступными
-    //     else{
-    //         // если уже недоступны, просто выходим
-    //         if(this.stavkaBtn.state == 0) return;
-
-    //         this.stavkaBtn.setState(0);
-    //         this.pasBtn.setState(0);
-
-    //         this.add.tween({
-    //             targets: [this.stavkaBtn, this.pasBtn],
-    //             props: {
-    //                 alpha: { value: 0.1, duration: 500 }
-    //             },
-    //             //delay:1000,
-    //             ease: 'Linear',
-    //             onComplete: () => {
-    //                 this.stavkaBtnCM.blackWhite();
-    //                 this.pasBtnCM.blackWhite();
-    //             }
-    //         })
-    //     }
-    // }
-
     /** делает кнопку ставка доступной/недоступной */
     setBetEnable(enable: boolean) {
+        if(enable && this.myGameManager.myUser.coins <= 0) return;
+
         // если хотим сделать доступными кнопки ставка и пас
         if (enable){
             // если уже доступны, выходим
@@ -614,54 +710,11 @@ export class PokerRoom extends Phaser.Scene
                 duration: 300,
                 onComplete: () => {
                     this.helpBtnCM.blackWhite();
+                    this.helpBtn.setState(0);
                 }
             });
         }
     }
-
-    /** вызывается если все игроки платежеспособны и можно начать игру */
-    // showDomPlay(){
-    //     let str = `<div class="flexContainer">
-    //         <div id="btnDiv"  name="doPlay"><button id="btnPlay" name="doPlay">
-    //         <span class="playTxt" name="doPlay">ИГРАТЬ</span></button></div>
-    //             <div class="listDiv">
-    //                 <ul class ="ulEl">
-    //                     <li>ВЫ: ` + this.playersDataArr[0].money + ` монет</li>
-    //                     <li>ОСЁЛ: ` + this.playersDataArr[1].money + ` монет</li>
-    //                     <li>ХРЮША: ` + this.playersDataArr[2].money + ` монет</li>
-    //                 </ul>
-    //             </div>
-    //         </div>`;
-        
-        
-    //     this.domElement.setHTML(str);
-    //     this.domElement.addListener('click');
-    //     this.domElement.on('click', (evt) => {
-    //         if(evt.target.attributes.name && 
-    //             evt.target.attributes.name.value == "doPlay"){
-    //             this.domElement.removeAllListeners('click');
-    //             this.tweens.add({
-    //                 targets: this.domElement,
-    //                 y: -300,
-    //                 duration: 2000,
-    //                 ease: 'Sine.easeInOut',
-    //                 loop: 0,
-    //                 onComplete: () => {
-    //                     this.startGame();
-    //                 }
-    //             });
-    //         }
-    //     });
-
-    //     this.tweens.add({
-    //         targets: this.domElement,
-    //         y: 300,
-    //         duration: 2000,
-    //         ease: 'Sine.easeInOut',
-    //         loop: 0,
-            
-    //     });
-    // }
 
     /** вызывается если все игроки платежеспособны и можно начать игру */
     showDomGameOver(){
@@ -750,7 +803,11 @@ export class PokerRoom extends Phaser.Scene
             },
             {from: 1000,
                 run: () => {
-                    this.missingState = GAMESTATE.FLOP_START;
+                    if (this.myGameManager.gameState == GAMESTATE.END) {
+                        this.missingState = GAMESTATE.END;
+                    } else {
+                        this.missingState = GAMESTATE.FLOP_START;
+                    }
                 }
             }
         ]).play();
@@ -758,10 +815,8 @@ export class PokerRoom extends Phaser.Scene
 
     showFlop(){
         this.tableCards[0].setTexture("card" + this.myGameManager.myTableArr[0]).setScale(0,1);
-        this.tableCards[1] = this.add.image(this.tableCards[0].x +70, this.tableCards[0].y,
-            "card" + this.myGameManager.myTableArr[1]).setScale(0,1);
-        this.tableCards[2] = this.add.image(this.tableCards[1].x +70, this.tableCards[1].y,
-            "card" + this.myGameManager.myTableArr[2]).setScale(0,1);
+        this.tableCards[1].setTexture("card" + this.myGameManager.myTableArr[1]).setScale(0,1);
+        this.tableCards[2].setTexture("card" + this.myGameManager.myTableArr[2]).setScale(0,1);
 
         this.add.timeline([
             {
@@ -807,14 +862,19 @@ export class PokerRoom extends Phaser.Scene
             },
             {
                 from: 500,
-                run: () => this.missingState = GAMESTATE.TERN_START
+                run: () => {
+                    if (this.myGameManager.gameState == GAMESTATE.END) {
+                        this.missingState = GAMESTATE.END
+                    } else {
+                        this.missingState = GAMESTATE.TERN_START
+                    }
+                }
             }
         ]).play();
     }
 
     showTern(){
-        this.tableCards[3] = this.add.image(this.tableCards[2].x +70, this.tableCards[2].y,
-            "card" + this.myGameManager.myTableArr[3]).setScale(0,1);
+        this.tableCards[3].setTexture("card" + this.myGameManager.myTableArr[3]).setScale(0,1);
 
         this.add.timeline([
             {
@@ -834,7 +894,7 @@ export class PokerRoom extends Phaser.Scene
                 }
             },
             {
-                from: 500,
+                from: 1000,
                 run: () => {
                     this.add.tween({
                         //delay: 1000,
@@ -846,20 +906,77 @@ export class PokerRoom extends Phaser.Scene
                 }
             },
             {
-                from: 500,
+                from: 1000,
                 run: () => this.myUserView.showTern()
             },
             {
-                from: 500,
+                from: 1000,
                 run: () => this.myLeftBotView.showTern()
             },
             {
-                from: 500,
+                from: 1000,
                 run: () => this.myRightBotView.showTern()
             },
             {
-                from: 500,
-                run: () => this.missingState = GAMESTATE.TERN_START
+                from: 1000,
+                run: () => {
+                    if (this.myGameManager.gameState == GAMESTATE.END) {
+                        this.missingState = GAMESTATE.END
+                    } else {
+                        this.missingState = GAMESTATE.RIVER_START;
+                    }
+                }
+            }
+        ]).play();
+    }
+
+    showRiver(){
+        this.tableCards[4].setTexture("card" + this.myGameManager.myTableArr[4]).setScale(0,1);
+
+        this.add.timeline([
+            {
+                at: 100,
+                run: () => {
+                    this.add.tween({
+                        targets: [this.bankTagTxt],
+                        props: {
+                            scaleY: { value: 0, duration: 500, yoyo: true },
+                            text: {
+                                value: this.myGameManager.gameBank,
+                                duration: 0, delay: 500
+                            }
+                        },
+                        ease: 'Linear'
+                    })
+                }
+            },
+            {
+                from: 1000,
+                run: () => {
+                    this.add.tween({
+                        //delay: 1000,
+                        targets: [this.tableCards[4]],
+                        props: {
+                            scaleX: { value: 1, duration: 500 }
+                        }
+                    })
+                }
+            },
+            {
+                from: 1000,
+                run: () => this.myUserView.showRiver()
+            },
+            {
+                from: 1000,
+                run: () => this.myLeftBotView.showRiver()
+            },
+            {
+                from: 1000,
+                run: () => this.myRightBotView.showRiver()
+            },
+            {
+                from: 1000,
+                run: () => this.missingState = GAMESTATE.END
             }
         ]).play();
     }
@@ -896,6 +1013,9 @@ class UserView implements IPlayerView
             fontSize:"72px", fontStyle: "bold", fontFamily: "Arial, Roboto"})
             .setOrigin(0.5,0.5).setAlpha(0);
 
+        this.twoCardImgArr[0] = myScene.add.image(634, 989, "empty");
+        this.twoCardImgArr[1] = myScene.add.image(702, 989, "empty");
+
         this.combiImgArr[0] = myScene.add.image(572, 858, "empty").setScale(0, 1);
         this.combiImgArr[1] = myScene.add.image(this.combiImgArr[0].x + 70, 858,
             "empty").setScale(0, 1);
@@ -918,7 +1038,7 @@ class UserView implements IPlayerView
     }
 
     doBet(){
-        if(myScene.myGameManager.myRightBot.playerState == PLAYERSTATE.PASSED){
+        if(myScene.myGameManager.myUser.playerState == PLAYERSTATE.PASSED){
             if(this.combiImgArr.length == 5){
                 myScene.add.tween({
                     targets:[this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
@@ -971,6 +1091,55 @@ class UserView implements IPlayerView
         }
     }
 
+    /** очищает от данных для начала следуей игры(розыгрыша банка) */
+    completeGame(){
+        myScene.add.tween({
+            targets: [this.tagTxt],
+            props: {
+                scaleY: { value: 0,
+                     duration: 500, yoyo: true },
+                text: { value: this.coins, duration: 0, delay: 500 }
+            },
+            ease: 'Linear',
+        })
+
+        myScene.add.tween({
+            targets: [this.twoCardImgArr[0],this.twoCardImgArr[1]],
+            props:{
+                scaleX: {value:0, duration: 500}
+            },
+            ease: 'Linear',
+            onComplete: () =>{
+                this.twoCardImgArr[0].setTexture("empty");
+                this.twoCardImgArr[1].setTexture("empty");
+                //this.twoCardImgArr = [];
+                this.twoCardValue = [];
+            }
+        });
+
+        myScene.add.tween({
+            delay:500,
+            targets: this.passTxt,
+            alpha:0,
+            duration:500,
+            onComplete: () => {
+                myScene.cowboyCM.reset();
+            }
+        })
+
+        myScene.add.tween({
+            targets:[this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
+                        this.combiImgArr[3],this.combiImgArr[4]],
+            props:{scaleX:{value:0, duration:500}},
+            onComplete: () => {
+                this.combiImgArr.forEach((img) => {
+                    img.setTexture("empty");
+                })
+            }
+        })
+        
+    }
+
     stopGame(){
 
     }
@@ -983,6 +1152,8 @@ class UserView implements IPlayerView
      *  показываем их на игровом поле
      */
     showTwoCard(){
+        if(myScene.myGameManager.myUser.playerState == PLAYERSTATE.OUTGAME) return;
+
         this.coinImg.setAlpha(1);
 
         // получаем значения карт из myGameManager и заносим их в массив twoCardValue
@@ -1000,10 +1171,11 @@ class UserView implements IPlayerView
         // });
 
         // показываем две карты
-        this.twoCardImgArr.push(myScene.add.image(this.twoCardCoordArr[0].x,
-            this.twoCardCoordArr[0].y, 'card'+this.twoCardValue[0]).setScale(0,1));
-        this.twoCardImgArr.push(myScene.add.image(this.twoCardCoordArr[1].x,
-            this.twoCardCoordArr[1].y, 'card'+this.twoCardValue[1]).setScale(0,1));
+        this.twoCardImgArr[0].setTexture('card'+this.twoCardValue[0]).setScale(0,1);
+        this.twoCardImgArr[1].setTexture('card'+this.twoCardValue[1]).setScale(0,1);
+
+        // this.twoCardImgArr.push(myScene.add.image(this.twoCardCoordArr[1].x,
+        //     this.twoCardCoordArr[1].y, 'card'+this.twoCardValue[1]).setScale(0,1));
 
         myScene.add.tween({
             targets: [this.twoCardImgArr[0],this.twoCardImgArr[1]],
@@ -1022,6 +1194,7 @@ class UserView implements IPlayerView
             ease: 'Linear',
         })
 
+        this.coinImg.setPosition(278, 884);
         myScene.add.tween({
             targets:this.coinImg,
             x:{value: 778, duration:800},
@@ -1114,6 +1287,47 @@ class UserView implements IPlayerView
             }
         ]).play();
     }
+
+    showRiver(){
+        let combiValArr:Array<number> = myScene.myGameManager.myUser.myCombi.combiArr;
+        // сначала скрываем карты комбинации в первом твине, в следующем твине
+        // открываем обновлённую комбинацию
+        myScene.add.timeline([
+            {
+                at: 500,
+                run: () => {
+                    myScene.add.tween({
+                        targets: [this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
+                                    this.combiImgArr[3],this.combiImgArr[4]],
+                        props: {
+                            scaleX: { value: 0, duration: 500},
+                        },
+                        ease: 'Linear',
+                        onComplete: () => {
+                            this.combiImgArr[0].setTexture("card" + combiValArr[0]);
+                            this.combiImgArr[1].setTexture("card" + combiValArr[1]);
+                            this.combiImgArr[2].setTexture("card" + combiValArr[2]);
+                            this.combiImgArr[3].setTexture("card" + combiValArr[3]);
+                            this.combiImgArr[4].setTexture("card" + combiValArr[4]);
+                        }
+                    })
+                }
+            },
+            {
+                from: 800,
+                run: () => {
+                    myScene.add.tween({
+                        targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                        this.combiImgArr[3], this.combiImgArr[4]],
+                        props: {
+                            scaleX: { value: 1, duration: 500 },
+                        },
+                        ease: 'Linear',
+                    })
+                }
+            }
+        ]).play();
+    }
 }
 
 class LeftBotView implements IPlayerView
@@ -1155,7 +1369,7 @@ class LeftBotView implements IPlayerView
         this.coinTagImg = myScene.add.image(264,548,"coinTag").setAlpha(0);
         this.tagTxt = myScene.add.text(264,548,"" + this.coins, { color: '#66120a', align: 'left',
             fontSize:"60px", fontStyle: "bold"}).setOrigin(0.5,0.5).setScale(1,0);
-        this.passTxt = myScene.add.text(294,266,"ПАС", { color: '#fff200', align: 'center',
+        this.passTxt = myScene.add.text(80,266,"ПАС", { color: '#fff200', align: 'center',
             fontSize:"72px", fontStyle: "bold", fontFamily: "Arial, Roboto"})
             .setOrigin(0.5,0.5).setAlpha(0);
 
@@ -1204,7 +1418,7 @@ class LeftBotView implements IPlayerView
                     this.handImgCM.blackWhite();
                 }
             })
-        }else{
+        }else if(myScene.myGameManager.myLeftBot.playerState == PLAYERSTATE.INGAME){
             this.coins = myScene.myGameManager.myLeftBot.coins;
             //this.tagTxt.setText("" + this.coins);
             myScene.add.tween({
@@ -1225,6 +1439,53 @@ class LeftBotView implements IPlayerView
         }
     }
 
+    /** очищает от данных для начала следуей игры(зозыгрыша банка) */
+    completeGame(){
+        myScene.add.tween({
+            targets: [this.tagTxt],
+            props: {
+                scaleY: { value: 0, duration: 500, yoyo: true },
+                text: { value: this.coins, duration: 0, delay: 500 }
+            },
+            ease: 'Linear',
+        })
+
+        myScene.add.tween({
+            targets: [this.twoCardImgArr[0],this.twoCardImgArr[1]],
+            props:{
+                scaleX: {value:0, duration: 500}
+            },
+            ease: 'Linear',
+            onComplete: () =>{
+                this.twoCardImgArr[0].setTexture("empty");
+                this.twoCardImgArr[1].setTexture("empty");
+                this.twoCardImgArr = [];
+                this.twoCardValue = [];
+            }
+        })
+
+        myScene.add.tween({
+            delay:500,
+            targets: this.passTxt,
+            alpha:0,
+            duration:500,
+            onComplete: () => {
+                this.playerImgCM.reset();
+            }
+        })
+
+        myScene.add.tween({
+            targets:[this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
+                        this.combiImgArr[3],this.combiImgArr[4]],
+            props:{scaleX:{value:0, duration:500}},
+            onComplete: () => {
+                this.combiImgArr.forEach((img) => {
+                    img.setTexture("empty");
+                })
+            }
+        })
+    }
+
     stopGame(){
         
     }
@@ -1234,6 +1495,8 @@ class LeftBotView implements IPlayerView
     }
 
     showTwoCard(){
+        if(myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME) return;
+
         this.coinImg.setAlpha(1);
 
         this.twoCardValue.push(myScene.myGameManager.myLeftBot.twoCardArr[0]);
@@ -1271,6 +1534,7 @@ class LeftBotView implements IPlayerView
             ease: 'Linear',
         })
 
+        this.coinImg.setPosition(264, 548);
         myScene.add.tween({
             targets:this.coinImg,
             x:{value: 778, duration:800},
@@ -1279,23 +1543,7 @@ class LeftBotView implements IPlayerView
     }
 
     showFlop(){
-        // this.coins = myScene.myGameManager.myLeftBot.coins;
-        // this.tagTxt.setText("" + this.coins);
-        // myScene.add.tween({
-        //     targets: [this.tagTxt],
-        //     props: {
-        //         scaleY: { value: 0, duration: 500, yoyo: true },
-        //         text: { value: this.coins, duration: 0, delay: 500 }
-        //     },
-        //     ease: 'Linear',
-        // })
-
-        // this.coinImg.setPosition(264, 548);
-        // myScene.add.tween({
-        //     targets: this.coinImg,
-        //     x: { value: 778, duration: 800 },
-        //     y: { value: 680, duration: 800 }
-        // });
+        if(myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME) return;
         
         let combiValArr:Array<number> = myScene.myGameManager.myLeftBot.myCombi.combiArr;
         // this.combiImgArr[0] = myScene.add.image(32,126, "card" + combiValArr[0]). 
@@ -1324,6 +1572,51 @@ class LeftBotView implements IPlayerView
     }
 
     showTern(){
+        if(myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME) return;
+
+        let combiValArr:Array<number> = myScene.myGameManager.myLeftBot.myCombi.combiArr;
+        // сначала скрываем карты комбинации в первом твине, в следующем твине
+        // открываем обновлённую комбинацию
+        myScene.add.timeline([
+            {
+                at: 500,
+                run: () => {
+                    myScene.add.tween({
+                        targets: [this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
+                                    this.combiImgArr[3],this.combiImgArr[4]],
+                        props: {
+                            scaleX: { value: 0, duration: 500},
+                        },
+                        ease: 'Linear',
+                        onComplete: () => {
+                            this.combiImgArr[0].setTexture("card" + combiValArr[0]);
+                            this.combiImgArr[1].setTexture("card" + combiValArr[1]);
+                            this.combiImgArr[2].setTexture("card" + combiValArr[2]);
+                            this.combiImgArr[3].setTexture("card" + combiValArr[3]);
+                            this.combiImgArr[4].setTexture("card" + combiValArr[4]);
+                        }
+                    })
+                }
+            },
+            {
+                from: 800,
+                run: () => {
+                    myScene.add.tween({
+                        targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                        this.combiImgArr[3], this.combiImgArr[4]],
+                        props: {
+                            scaleX: { value: 1, duration: 500 },
+                        },
+                        ease: 'Linear',
+                    })
+                }
+            }
+        ]).play();
+    }
+
+    showRiver(){
+        if(myScene.myGameManager.myLeftBot.playerState != PLAYERSTATE.INGAME) return;
+
         let combiValArr:Array<number> = myScene.myGameManager.myLeftBot.myCombi.combiArr;
         // сначала скрываем карты комбинации в первом твине, в следующем твине
         // открываем обновлённую комбинацию
@@ -1454,7 +1747,7 @@ class RightBotView implements IPlayerView
                     this.handImgCM.blackWhite();
                 }
             })
-        }else{
+        }else if(myScene.myGameManager.myRightBot.playerState == PLAYERSTATE.INGAME){
             this.coins = myScene.myGameManager.myRightBot.coins;
             //this.tagTxt.setText("" + this.coins);
             myScene.add.tween({
@@ -1475,6 +1768,56 @@ class RightBotView implements IPlayerView
         }
     }
 
+    /** очищает от данных для начала следуей игры(розыгрыша банка), 
+     * вносит изменения в количества монет
+     */
+    completeGame(){
+        myScene.add.tween({
+            targets: [this.tagTxt],
+            props: {
+                scaleY: { value: 0,
+                     duration: 500, yoyo: true },
+                text: { value: this.coins, duration: 0, delay: 500 }
+            },
+            ease: 'Linear',
+        })
+
+        myScene.add.tween({
+            targets: [this.twoCardImgArr[0],this.twoCardImgArr[1]],
+            props:{
+                scaleX: {value:0, duration: 500}
+            },
+            ease: 'Linear',
+            onComplete: () =>{
+                this.twoCardImgArr[0].setTexture("empty");
+                this.twoCardImgArr[1].setTexture("empty");
+                this.twoCardImgArr = [];
+                this.twoCardValue = [];
+            }
+        })
+
+        myScene.add.tween({
+            delay:500,
+            targets: this.passTxt,
+            alpha:0,
+            duration:500,
+            onComplete: () => {
+                this.playerImgCM.reset();
+            }
+        })
+
+        myScene.add.tween({
+            targets:[this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
+                        this.combiImgArr[3],this.combiImgArr[4]],
+            props:{scaleX:{value:0, duration:500}},
+            onComplete: () => {
+                this.combiImgArr.forEach((img) => {
+                    img.setTexture("empty");
+                })
+            }
+        })
+    }
+
     stopGame(){
         
     }
@@ -1484,6 +1827,8 @@ class RightBotView implements IPlayerView
     }
 
     showTwoCard(){
+        if(myScene.myGameManager.myRightBot.playerState == PLAYERSTATE.OUTGAME) return;
+
         this.coinImg.setAlpha(1);
 
         this.twoCardValue.push(myScene.myGameManager.myRightBot.twoCardArr[0]);
@@ -1521,6 +1866,7 @@ class RightBotView implements IPlayerView
             ease: 'Linear'
         })
         //654,520
+        this.coinImg.setPosition(654, 520);
         myScene.add.tween({
             targets:this.coinImg,
             x:{value: 778, duration:800},
@@ -1529,6 +1875,8 @@ class RightBotView implements IPlayerView
     }
 
     showFlop(){
+        if(myScene.myGameManager.myRightBot.playerState != PLAYERSTATE.INGAME) return;
+
         // this.coins = myScene.myGameManager.myRightBot.coins;
         // this.tagTxt.setText("" + this.coins);
         // myScene.add.tween({
@@ -1548,16 +1896,6 @@ class RightBotView implements IPlayerView
         // });
 
         let combiValArr:Array<number> = myScene.myGameManager.myRightBot.myCombi.combiArr;
-        // this.combiImgArr[0] = myScene.add.image(566,158, "card" + combiValArr[0]). 
-        //     setScale(0,1);
-        // this.combiImgArr[1] = myScene.add.image(this.combiImgArr[0].x + 70,158,
-        //     "card" + combiValArr[1]).setScale(0,1);
-        // this.combiImgArr[2] = myScene.add.image(this.combiImgArr[1].x + 70,158,
-        //     "card" + combiValArr[2]).setScale(0,1);
-        // this.combiImgArr[3] = myScene.add.image(this.combiImgArr[2].x + 70,158,
-        //     "card" + combiValArr[3]).setScale(0,1);
-        // this.combiImgArr[4] = myScene.add.image(this.combiImgArr[3].x + 70,158,
-        //     "card" + combiValArr[4]).setScale(0,1);
 
         this.combiImgArr[0].setTexture("card" + combiValArr[0]);
         this.combiImgArr[1].setTexture("card" + combiValArr[1]);
@@ -1574,6 +1912,51 @@ class RightBotView implements IPlayerView
     }
 
     showTern(){
+        if(myScene.myGameManager.myRightBot.playerState != PLAYERSTATE.INGAME) return;
+
+        let combiValArr:Array<number> = myScene.myGameManager.myRightBot.myCombi.combiArr;
+        // сначала скрываем карты комбинации в первом твине, в следующем твине
+        // открываем обновлённую комбинацию
+        myScene.add.timeline([
+            {
+                at: 500,
+                run: () => {
+                    myScene.add.tween({
+                        targets: [this.combiImgArr[0],this.combiImgArr[1],this.combiImgArr[2],
+                                    this.combiImgArr[3],this.combiImgArr[4]],
+                        props: {
+                            scaleX: { value: 0, duration: 500},
+                        },
+                        ease: 'Linear',
+                        onComplete: () => {
+                            this.combiImgArr[0].setTexture("card" + combiValArr[0]);
+                            this.combiImgArr[1].setTexture("card" + combiValArr[1]);
+                            this.combiImgArr[2].setTexture("card" + combiValArr[2]);
+                            this.combiImgArr[3].setTexture("card" + combiValArr[3]);
+                            this.combiImgArr[4].setTexture("card" + combiValArr[4]);
+                        }
+                    })
+                }
+            },
+            {
+                from: 800,
+                run: () => {
+                    myScene.add.tween({
+                        targets: [this.combiImgArr[0], this.combiImgArr[1], this.combiImgArr[2],
+                        this.combiImgArr[3], this.combiImgArr[4]],
+                        props: {
+                            scaleX: { value: 1, duration: 500 },
+                        },
+                        ease: 'Linear',
+                    })
+                }
+            }
+        ]).play();
+    }
+
+    showRiver(){
+        if(myScene.myGameManager.myRightBot.playerState != PLAYERSTATE.INGAME) return;
+
         let combiValArr:Array<number> = myScene.myGameManager.myRightBot.myCombi.combiArr;
         // сначала скрываем карты комбинации в первом твине, в следующем твине
         // открываем обновлённую комбинацию
@@ -1619,11 +2002,19 @@ class DomManager{
     // перечень комбинаций по возрастанию
     combiList:string;
     combiListEn:string;
-    namesLst:{user:string, leftBot:string, rightBot:string};
+    //namesLst:{user:string, leftBot:string, rightBot:string};
+    namesLst:{[key:string]: string };
     combiNames:Array<string>;
 
+    /**строка, которая формируется в зависимости от состояния игры */
+    contextStr:string;
+
+    /**строка со справочными данными - перечень и сила комбинаций и т.п. */
+    constantStr:string;
+
     constructor(){
-        this.namesLst = {"user":"У Вас","leftBot": "У Ослика", "rightBot":"У Хрюши"};
+        this.namesLst = {"user":"У Вас","leftBot": "У Ослика", "rightBot":"У Хрюши",
+            "oslik": "У Ослика", "piggi": "У Хрюши"};
         this.combiNames = ["Старшая карта", "Пара", "Две пары", "Стрит", "Тройка",
             "Фулл Хаус", "Флеш", "Каре", "Стрит Флеш", "Роял Флеш"];
 
@@ -1660,27 +2051,79 @@ class DomManager{
             Royal Flush`;
     }
 
+    /** вызывается при нажатии "?" */
+    showHelp(){
+        myScene.setHelpEnable(false);
+        myScene.setBetEnable(false);
+        myScene.setPasEnable(false);
+
+        let str = `<div class="flexContainer">
+            <div id="btnDiv"  name="doPlay"><button id="btnPlay" name="doPlay">
+            <span class="playTxt" name="doPlaySpan">ЗАКРЫТЬ</span></button></div>`;
+                
+
+        str= str + `<div class="listDiv"><p id="spoil"> *Текст можно прокрутить! </p>` + 
+                this.contextStr + this.combiList + `</div></div>`;
+
+        myScene.domElement.setHTML(str);
+        myScene.domElement.addListener('click');
+        myScene.domElement.on('click', (evt) => {
+            if ((document.getElementById("btnDiv").contains(evt.target) ||
+                evt.target.id == "doPlaySpan")) {
+                myScene.domElement.removeAllListeners('click');
+                myScene.tweens.add({
+                    targets: myScene.domElement,
+                    y: -600,
+                    duration: 1000,
+                    ease: 'Sine.easeInOut',
+                    loop: 0,
+                    onComplete: () => {
+                        //if(myScene.missingState != GAMESTATE.TWO_CARD_START)
+                            myScene.setHelpEnable(true);
+
+                        myScene.setBetEnable(true);
+
+                        if(myScene.missingState != GAMESTATE.TWO_CARD_START)
+                            myScene.setPasEnable(true);
+                    }
+                });
+            }
+        });
+
+        myScene.tweens.add({
+            targets: myScene.domElement,
+            y: 600,
+            duration: 1000,
+            ease: 'Sine.easeInOut',
+            loop: 0,
+        });
+    }
+
     /** первое приглашение в игру после загрузки приложения */
     inviteToApp(){
         // если данных об игроке нет, играем первый уровень
         if (globalThis.levelsData.length == 0 ||
             globalThis.levelsData[0].levelState != LEVELSTATE.COMPLETED) {
-            globalThis.numLevel = 1
+            globalThis.numLevel = 2
         }
 
-        let str = `<div class="flexContainer">
+        this.contextStr = `Вы на первом уровне. Ваши соперники Ослик и Хрюша. Их стратегии
+            просты: Ослик
+            делает ставки всегда пока есть монеты, Хрюша всё повторяет
+            за Вами - и ставку и пас. Используйте в игре кнопки "Пас" и
+            "Ставка".  Для получения информации жмите кнопку "?".
+            <p  >
+                Игра начинается со ставки перед игрой, после чего сдаётся
+                по две карты. Ставка фиксирована - 10 монет.
+            </p>`;
+
+
+         let str:string = `<div class="flexContainer">
             <div id="btnDiv"  name="doPlay"><button id="btnPlay" name="doPlay">
             <span class="playTxt" name="doPlaySpan">ИГРАТЬ</span></button></div>
                 <div class="listDiv">
-                <p id="spoil"> *Текст можно прокрутить! </p>
-                    Вы на первом уровне. Ваши соперники Ослик и Хрюша. Ослик
-                    делает ставки всегда пока есть монеты, Хрюша всё повторяет
-                    за Вами - и ставку и пас. Используйте в игре кнопки "Пас" и
-                    "Ставка".  Для получения информации жмите кнопку "?".
-                    <p  >
-                        Игра начинается с взноса перед игрой, после чего сдаётся
-                        по две карты.
-                    </p>`+
+                <p id="spoil"> *Текст можно прокрутить! </p>`+
+                    this.contextStr+
                     this.combiList +
                 `</div>
             </div>`;
@@ -1718,20 +2161,19 @@ class DomManager{
      * чтобы начать игру
      */
     inviteToTwoCard(){
-        let str;
         if(globalThis.numLevel == 1){
-        str = `<div class="flexContainer">
-                <div class="listDiv">
-                    <p style="text-align: center;">Сделайте ставку (кнопка "Ставка"),
+        this.contextStr = `
+                <p style="text-align: center;">Сделайте ставку (кнопка "Ставка"),
                      чтобы начать игру.</p>
                     <ul class ="ulEl">
                         <li>У Вас ` + myScene.myUserView.coins + ` монет.</li>
                         <li>У Ослика ` +myScene.myLeftBotView.coins+ ` монет. </li>
                         <li>У Хрюши ` +myScene.myRightBotView.coins+` монет.</li>
-                    </ul>
-                </div>
-            </div> `
+                    </ul>`
         }
+
+        let str:string = `<div class="flexContainer"><div class="listDiv">` + 
+                        this.contextStr + '</div></div>';
 
         myScene.domElement.setHTML(str);
         myScene.add.timeline([
@@ -1763,35 +2205,39 @@ class DomManager{
                 from: 1000,
                 run: () => {
                     myScene.setBetEnable(true);
-                    myScene.setPasEnable(true);
+                    myScene.setPasEnable(false);
                     myScene.setHelpEnable(true);
                 }
             }
         ]).play();
     }
 
-    inviteToFlop(){
-        let row1 = `<li>`+ this.namesLst[myScene.myGameManager.playersCombiArr[0].player]+
-            `: `+ this.combiNames[myScene.myGameManager.playersCombiArr[0].combi.combiName]+
-            `</li>`;
-        let row2 = `<li>`+ this.namesLst[myScene.myGameManager.playersCombiArr[1].player]+
-            `: `+ this.combiNames[myScene.myGameManager.playersCombiArr[1].combi.combiName]+
-            `</li>`;
-        let row3 = `<li>`+ this.namesLst[myScene.myGameManager.playersCombiArr[2].player]+
-            `: `+ this.combiNames[myScene.myGameManager.playersCombiArr[2].combi.combiName]+
-            `</li>`;
+    getActivePlayers():string {
+        let str: string = "";
+        myScene.myGameManager.playersInGame.forEach((plr) => {
+            str = str + `<li>` + this.namesLst[plr.name] + `: ` +
+                this.combiNames[plr.myCombi.combiName] + `</li>`
+        })
 
-        let str = `<div class="flexContainer">
-                <div class="listDiv">
-                    <ul class ="ulEl">`+
-                        row1+row2+row3+
-                    `</ul>
-                    <p style="text-align: center;">Следующая стадия - Флоп. 
-                     На столе открываются три карты и из этих трёх карт и двух
-                     карт каждого игрока составляются комбинации. Вы должны сделать
-                     выбор - "ПАС" или "СТАВКА".</p>
-                    </div>
-                </div> `;
+        return str;
+    }
+
+    /**роздано по две карты каждому игроку предлагается сделать ставку
+     * или пасовать, чтобы продолжить игру, начать играть флоп 
+     */
+    inviteToFlop(){
+        this.contextStr = `
+            <ul class ="ulEl">`+
+                this.getActivePlayers() +
+            `</ul>
+            <p style="text-align: center;">Следующая стадия - Флоп. 
+            На столе открываются три карты и из этих трёх карт и двух
+            карт каждого игрока составляются комбинации. Вы должны сделать
+            выбор - "ПАС" или "СТАВКА".</p>`;
+
+        let str = `<div class="flexContainer"><div class="listDiv">` +
+                    this.contextStr + 
+                  `</div></div> `;
         
         myScene.domElement.setHTML(str);
         myScene.add.timeline([
@@ -1830,27 +2276,21 @@ class DomManager{
         ]).play();
     }
 
+    /**открыты три карты, предлагается сделать ставку
+     * или пасовать, чтобы продолжить игру, играть терн 
+     */
     inviteToTern(){
-        let row1 = `<li>`+ this.namesLst[myScene.myGameManager.playersCombiArr[0].player]+
-            `: `+ this.combiNames[myScene.myGameManager.playersCombiArr[0].combi.combiName]+
-            `</li>`;
-        let row2 = `<li>`+ this.namesLst[myScene.myGameManager.playersCombiArr[1].player]+
-            `: `+ this.combiNames[myScene.myGameManager.playersCombiArr[1].combi.combiName]+
-            `</li>`;
-        let row3 = `<li>`+ this.namesLst[myScene.myGameManager.playersCombiArr[2].player]+
-            `: `+ this.combiNames[myScene.myGameManager.playersCombiArr[2].combi.combiName]+
-            `</li>`;
-
-        let str = `<div class="flexContainer">
-            <div class="listDiv">
-                <ul class ="ulEl">`+
-            row1 + row2 + row3 +
+        this.contextStr = `<ul class ="ulEl">` +
+            this.getActivePlayers() +
             `</ul>
                 <p style="text-align: center;">Следующая стадия - Терн. 
-                 Будет открыта ещё одна карта, которую можно будет добавить
-                 в комбинацию. За Вами выбор - "ПАС" или "СТАВКА".</p>
-                </div>
-            </div> `;
+                Будет открыта ещё одна карта, которую можно будет добавить
+                в комбинацию. За Вами выбор - "ПАС" или "СТАВКА".</p>
+            `
+
+        let str = `<div class="flexContainer"><div class="listDiv">` +
+            this.contextStr +
+            `</div></div> `;
 
             myScene.domElement.setHTML(str);
             myScene.add.timeline([
@@ -1887,5 +2327,197 @@ class DomManager{
                     }
                 }
             ]).play();
+    }
+
+    /**открыта четвёртая карта, предлагается сделать ставку
+     * или пасовать, чтобы продолжить игру, играть ривер 
+     */
+    inviteToRiver(){
+        this.contextStr = `<div class="listDiv">
+            <ul class ="ulEl">`+
+            this.getActivePlayers() +
+            `</ul>
+            <p style="text-align: center;">Следующая стадия - Ривер. 
+             Будет открыта ещё одна карта, которую можно будет добавить
+             в комбинацию. За Вами выбор - "ПАС" или "СТАВКА".</p>
+            </div>`;
+
+        let str = `<div class="flexContainer">`
+            + this.contextStr +
+            `</div> `;
+
+            myScene.domElement.setHTML(str);
+            myScene.add.timeline([
+                {
+                    at: 1000,
+                    run: () => {
+                        myScene.tweens.add({
+                            targets: myScene.domElement,
+                            y: 900,
+                            duration: 1000,
+                            ease: 'Sine.easeInOut',
+                            loop: 0
+                        })
+                    }
+                },
+                {
+                    from: 3500,
+                    run: () => {
+                        myScene.tweens.add({
+                            targets: myScene.domElement,
+                            y: -600,
+                            duration: 1000,
+                            ease: 'Sine.easeInOut',
+                            loop: 0
+                        })
+                    }
+                },
+                {
+                    from: 1000,
+                    run: () => {
+                        myScene.setBetEnable(true);
+                        myScene.setPasEnable(true);
+                        myScene.setHelpEnable(true);
+                    }
+                }
+            ]).play();
+    }
+
+    /** вызывается при окончании розыгрыша, информирует об окончании игры */
+    showEnd(){
+        if(myScene.bankTagTxt.text != (myScene.myGameManager.gameBank + "")){
+            myScene.add.tween({
+                delay:100,
+                targets: [myScene.bankTagTxt],
+                props: {
+                    scaleY: { value: 0, duration: 500, yoyo: true },
+                    text: {
+                        value: myScene.myGameManager.gameBank,
+                        duration: 0, delay: 500
+                    }
+                },
+                ease: 'Linear',
+            })
+        }
+
+        let str:string = "";
+        myScene.myGameManager.playersInGame.forEach((plr) => {
+            str = str + `<li>` + this.namesLst[plr.name] +`: `+ 
+            this.combiNames[plr.myCombi.combiName]+`</li>`
+        })
+
+        let winStr = "";
+        myScene.myGameManager.winnersPlayers.forEach((plr) => {
+            winStr = winStr + `<li>` + this.namesLst[plr.name] +`: `+ 
+            this.combiNames[plr.myCombi.combiName]+`</li>`
+        });
+        winStr = `<ul class ="ulEl">`+
+            winStr +
+            `</ul>
+                <hr style = "border-width:5px">
+                    <p style="text-align: center;">Розыгрыш закончен. 
+                     </p>`;
+        
+        str = `<div class="flexContainer">
+            <div class="listDiv">
+                <ul class ="ulEl">`+
+                str +
+            `</ul>
+            <hr style = "border-width:5px">
+                <p style="text-align: center;">Банк разделили. 
+                 </p>` +
+                winStr + 
+            `</div></div> `;
+
+        myScene.domElement.setHTML(str);
+        myScene.add.timeline([
+            {
+                at: 1000,
+                run: () => {
+                    myScene.tweens.add({
+                        targets: myScene.domElement,
+                        y: 900,
+                        duration: 1000,
+                        ease: 'Sine.easeInOut',
+                        loop: 0
+                    })
+                }
+            },
+            {
+                from: 3500,
+                run: () => {
+                    myScene.tweens.add({
+                        targets: myScene.domElement,
+                        y: -600,
+                        duration: 1000,
+                        ease: 'Sine.easeInOut',
+                        loop: 0,
+                        onComplete: () => {
+                            myScene.missingState = GAMESTATE.RESULT;
+                        }
+                    })
+                }
+            },
+            // {
+            //     from: 1000,
+            //     run: () => {
+            //         myScene.contBtn.setTexture("continueBtn0").setScale(0);
+            //         myScene.add.tween({
+            //             targets:myScene.contBtn,
+            //             scale:1,
+            //             duration:500,
+            //             ease: 'Sine.easeInOut',
+            //             onComplete: () => {
+            //                 myScene.contBtn.setInteractive();
+            //             }
+            //         })
+            //     }
+            // },
+            // {
+            //     from: 1000,
+            //     run: () => {
+            //         myScene.missingState = GAMESTATE.RESULT;
+            //     }
+            // }
+        ]).play();
+    }
+
+    /** вызывается если завершено прохождение уровня */
+    showLevelEnd(){
+        let str:string = "";
+        str = `<div class="flexContainer">` +
+            `<p>Уровень завершён</p>` +
+            `</div> `;
+
+        myScene.domElement.setHTML(str);
+        myScene.add.timeline([
+            {
+                at: 1000,
+                run: () => {
+                    myScene.tweens.add({
+                        targets: myScene.domElement,
+                        y: 900,
+                        duration: 1000,
+                        ease: 'Sine.easeInOut',
+                        loop: 0
+                    })
+                }
+            },
+            {
+                from: 3500,
+                run: () => {
+                    myScene.tweens.add({
+                        targets: myScene.domElement,
+                        y: -600,
+                        duration: 1000,
+                        ease: 'Sine.easeInOut',
+                        loop: 0,
+                        onComplete: () => {
+                            myScene.missingState = GAMESTATE.RESULT;
+                        }
+                    })
+                }
+            },
+        ]).play();
     }
 }

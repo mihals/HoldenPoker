@@ -34,4 +34,5 @@ body {background-color: bisque; margin: 0;}
     border-radius: 30px; padding: 50px; margin-top: 50px;}
 
 #combiLst li {text-align: left;}
-#spoil {color: red;}
+#spoil {color: red; font-weight: bold; font-size: 40px;
+    font-family: Arial, Roboto, Helvetica, sans-serif}
