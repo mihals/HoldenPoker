@@ -1,3 +1,20 @@
+import { PLAYER_ID } from "./common"
+
+enum LEVELSTATE{COMPLETED, ENABLE, DISABLE}
+
+type PlayerData = {
+    name: string,
+    coins: number
+}
+
+type LevelData = {
+    playersData: Array<PlayerData>,
+    levelState: LEVELSTATE
+}
+
+type LevelsData = Array<LevelData>; 
+
+
 enum COMBINATION  {BIGGEST_CARD, PAIR, TWO_PAIR, STREET, TRIPLE,
     FULL_HOUSE, FLASH, CARE, STREET_FLASH, ROYAL_FLASH };
 
@@ -19,12 +36,16 @@ type combi = {"combiName":COMBINATION, "cardValue": number, "combiArr": Array<nu
 
 interface IPlayer{
     /** имя игрока */
-    name:string;
+    //name:string;
+
     /** капитал игрока */
     coins:number;
     twoCardArr:Array<number>;
     playerState:PLAYERSTATE;
     myCombi:combi;
+
+    /** идентификатор игрока, определяющий его стратегию */
+    playerId:PLAYER_ID;
 
     /** сдаются две карты */
     setTwoCard(firstCard:number, secondCard:number):void;
@@ -43,6 +64,10 @@ interface IPlayer{
 
     /** открылась пятая карта */
     river():void;
+
+    /** обновляет данные игрока перед началом уровня
+     *  после окончания предыдущего уровня */
+    update(playerId:PLAYER_ID, coins: number):void;
 }
 
 /** массив игроков */
@@ -84,7 +109,8 @@ export class GameManager {
     lvlWinners:Array<IPlayer> = [];
 
     constructor() {
-
+        globalThis.levelsData = {playerName:"Me", 
+            playerAchiev:[{numLvl:0,coins:0,levelState:LEVELSTATE.DISABLE}]};
     }
 
     /** тасуем карты, в зависимости от номера уровня назначаем имена игрокам,
@@ -133,9 +159,9 @@ export class GameManager {
 
         switch(numLvl){
             case 1:
-                this.myUser = new User("user",50);
-                this.myLeftBot = new LeftBot("oslik",50);
-                this.myRightBot = new RightBot("piggi",50);
+                this.myUser = new User(PLAYER_ID.USER,70);
+                this.myLeftBot = new LeftBot(PLAYER_ID.OSLIK,70);
+                this.myRightBot = new RightBot(PLAYER_ID.PIGGI,70);
 
                 this.playersArr.push(this.myUser);
                 this.playersArr.push(this.myLeftBot);
@@ -146,10 +172,19 @@ export class GameManager {
                 // });
                 break;
             case 2:
-                this.myUser = new User("user",70);
-                this.myLeftBot = new LeftBot("izabelle",70);
-                this.myRightBot = new RightBot("pirate",70);
+                this.myUser = new User(PLAYER_ID.USER,70);
+                this.myLeftBot = new LeftBot(PLAYER_ID.PIRATE,70);
+                this.myRightBot = new RightBot(PLAYER_ID.IZABELLE,70);
 
+                this.playersArr.push(this.myUser);
+                this.playersArr.push(this.myLeftBot);
+                this.playersArr.push(this.myRightBot);
+                break;
+            case 3:
+                this.myUser = new User(PLAYER_ID.USER,70);
+                this.myLeftBot = new LeftBot(PLAYER_ID.FROG,70);
+                this.myRightBot = new RightBot(PLAYER_ID.CHIEF,70);
+    
                 this.playersArr.push(this.myUser);
                 this.playersArr.push(this.myLeftBot);
                 this.playersArr.push(this.myRightBot);
@@ -157,7 +192,7 @@ export class GameManager {
         }
     }
 
-    /** проверяет не закончилась ли игра, определяет оставшихся
+    /** проверяет не закончилась ли игра(розыгрыш банка), определяет оставшихся
      * в игре персов
      */
     checkGameState() {
@@ -374,34 +409,12 @@ export class GameManager {
     * больше одного игрока, продолжаем - открываем первые три карты, переходим
     * к терну */
     playFlop(isBet: boolean) {
-        if (this.playersArr[1].name == "oslik") {
-            if (this.playersArr[1].coins >= 10) {
-                this.playersArr[1].coins -= 10;
-                this.gameBank += 10;
-            } else {
-                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
-                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
-
-                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
-                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
-            }
-        }
-
-        // если игрок пасовал
         if (!isBet) {
             if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
                 this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
 
             if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
                 this.playersArr[0].playerState = PLAYERSTATE.PASSED;
-
-            if (this.playersArr[2].name == "piggi") {
-                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
-                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
-
-                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
-                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
-            }
         } else {
             if (this.playersArr[0].coins >= 10) {
                 this.playersArr[0].coins -= 10;
@@ -413,19 +426,18 @@ export class GameManager {
                 if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
                     this.playersArr[0].playerState = PLAYERSTATE.PASSED;
             }
+        }
 
-            if (this.playersArr[2].name == "piggi") {
-                if (this.playersArr[2].coins >= 10) {
-                    this.playersArr[2].coins -= 10;
-                    this.gameBank += 10;
-                } else {
-                    if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
-                        this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
-
-                    if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
-                        this.playersArr[2].playerState = PLAYERSTATE.PASSED;
-                }
-            }
+        switch(globalThis.numLevel){
+            case 1:
+                this.playFlop1(isBet); // для хрюши и ослика
+            break;
+            case 2:
+                this.playFlop2(isBet); // изабелла и пират
+            break;
+            case 3:
+                this.playFlop3(isBet); // изабелла и пират
+            break;
         }
             
         this.checkGameState();
@@ -434,15 +446,6 @@ export class GameManager {
 
         this.gameState = GAMESTATE.FLOP;
         
-            // let nullCoinsArr = this.playersArr.filter((plr) => {
-            //     if(plr.coins == 0) return true;
-            // })
-
-            // if(nullCoinsArr.length != 0){
-            //    this.gameState = GAMESTATE.END;
-            //    return;
-            // } 
-
         tableArr.push(this.shuffledArr.pop(), this.shuffledArr.pop(),
             this.shuffledArr.pop());
         tableArr.sort((a, b) => {
@@ -458,8 +461,9 @@ export class GameManager {
         this.myTableArr = tableArr;
     }
 
-    playTern(isBet:boolean){
-        if (this.playersArr[1].name == "oslik") {
+    /** флоп для первого уровня (с осликом и хрюшей) */
+    playFlop1(isBet: boolean){
+        if (this.playersArr[1].playerId == PLAYER_ID.OSLIK) {
             if (this.playersArr[1].coins >= 10) {
                 this.playersArr[1].coins -= 10;
                 this.gameBank += 10;
@@ -473,33 +477,16 @@ export class GameManager {
         }
 
         // если игрок пасовал
-        if (!isBet) {
-            if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
-                this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
-
-            if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
-                this.playersArr[0].playerState = PLAYERSTATE.PASSED;
-
-            if (this.playersArr[2].name == "piggi") {
+        //if (!isBet) {
+        if (this.playersArr[2].playerId == PLAYER_ID.PIGGI) {
+            if (!isBet) {
                 if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
                     this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
 
                 if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
                     this.playersArr[2].playerState = PLAYERSTATE.PASSED;
             }
-        } else {
-            if (this.playersArr[0].coins >= 10) {
-                this.playersArr[0].coins -= 10;
-                this.gameBank += 10;
-            } else {
-                if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
-                    this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
-
-                if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
-                    this.playersArr[0].playerState = PLAYERSTATE.PASSED;
-            }
-
-            if (this.playersArr[2].name == "piggi") {
+            else {
                 if (this.playersArr[2].coins >= 10) {
                     this.playersArr[2].coins -= 10;
                     this.gameBank += 10;
@@ -511,6 +498,122 @@ export class GameManager {
                         this.playersArr[2].playerState = PLAYERSTATE.PASSED;
                 }
             }
+        }
+    }
+
+    /** флоп для второго уровня (с изабеллой и пиратом) */
+    playFlop2(isBet: boolean){
+        if (this.playersArr[1].playerId == PLAYER_ID.PIRATE) {
+            if (this.playersArr[1].twoCardArr[0] > 17 &&
+                this.playersArr[1].twoCardArr[1] > 17) {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[1].coins >= 10) {
+                    this.playersArr[1].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+
+        if (this.playersArr[2].playerId == PLAYER_ID.IZABELLE) {
+            if (this.playersArr[2].coins >= 10 && 
+                
+                this.playersArr[2].playerState == PLAYERSTATE.INGAME)  {
+                this.playersArr[2].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+    }
+
+    playFlop3(isBet: boolean){
+        if (this.playersArr[1].playerId == PLAYER_ID.FROG) {
+            if (this.playersArr[1].coins >=  this.playersArr[0].coins &&
+                this.playersArr[1].coins  >=  this.playersArr[2].coins) {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[1].coins >= 10) {
+                    this.playersArr[1].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+
+        if (this.playersArr[2].playerId == PLAYER_ID.CHIEF) {
+            if (this.playersArr[2].twoCardArr[0] < 18 &&
+                this.playersArr[2].twoCardArr[1] < 18) {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[2].coins >= 10) {
+                    this.playersArr[2].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+    }
+
+    playTern(isBet:boolean){
+        if (!isBet) {
+            if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+            if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+        } else {
+            if (this.playersArr[0].coins >= 10) {
+                this.playersArr[0].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+
+        switch(globalThis.numLevel){
+            case 1:
+                this.playTern1(isBet); // для хрюши и ослика
+            break;
+            case 2:
+                this.playTern2(isBet); // изабелла и пират
+            break;
+            case 3:
+                this.playTern3(isBet); // третий уровень
+            break;
         }
             
         this.checkGameState();
@@ -533,8 +636,249 @@ export class GameManager {
         this.myTableArr = tableArr;
     }
 
+    playTern1(isBet:boolean)
+    {
+        if (this.playersArr[1].playerId == PLAYER_ID.OSLIK) {
+            if (this.playersArr[1].coins >= 10) {
+                this.playersArr[1].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+
+        // если игрок пасовал
+        if (this.playersArr[2].playerId == PLAYER_ID.PIGGI) {
+            if (!isBet) {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+            else {
+                if (this.playersArr[2].coins >= 10) {
+                    this.playersArr[2].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+    }
+
+    playTern2(isBet:boolean){
+        let numRedCards:number = 0;
+
+        tableArr.forEach((card) => {
+            if(card > 17) numRedCards++;
+        });
+
+        
+
+        if (this.playersArr[1].playerId == PLAYER_ID.PIRATE) {
+            if (numRedCards >= 2) {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME && 
+                        this.playersArr[1].coins >= 10) {
+                    this.playersArr[1].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+
+        if (this.playersArr[2].playerId == PLAYER_ID.IZABELLE) {
+            if (this.playersArr[2].coins >= 10 && 
+                this.playersArr[1].playerState != PLAYERSTATE.INGAME &&
+                this.playersArr[2].playerState == PLAYERSTATE.INGAME ) {
+                this.playersArr[2].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+    }
+
+    playTern3(isBet:boolean){
+        if (this.playersArr[1].playerId == PLAYER_ID.FROG) {
+            if (this.playersArr[1].coins >=  this.playersArr[0].coins &&
+                this.playersArr[1].coins  >=  this.playersArr[2].coins) {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[1].coins >= 10) {
+                    this.playersArr[1].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+        
+        let numBlackCards:number = 0;
+
+        tableArr.forEach((card) => {
+            if(card < 18) numBlackCards++;
+        });
+
+        
+
+        if (this.playersArr[2].playerId == PLAYER_ID.CHIEF) {
+            if (numBlackCards >= 2) {
+                if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[2].playerState == PLAYERSTATE.INGAME && 
+                        this.playersArr[2].coins >= 10) {
+                    this.playersArr[2].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+                    if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
+    }
+
     playRiver(isBet:boolean){
-        if (this.playersArr[1].name == "oslik") {
+        if (!isBet) {
+            if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+            if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+        } else {
+            if (this.playersArr[0].coins >= 10) {
+                this.playersArr[0].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+                if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+            }
+        }
+
+        // if (this.playersArr[1].playerId == PLAYER_ID.OSLIK) {
+        //     if (this.playersArr[1].coins >= 10) {
+        //         this.playersArr[1].coins -= 10;
+        //         this.gameBank += 10;
+        //     } else {
+        //         if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+        //             this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+
+        //         if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+        //             this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+        //     }
+        // }
+
+        // // если игрок пасовал
+        // if (!isBet) {
+        //     if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+        //         this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+        //     if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+        //         this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+
+        //     if (this.playersArr[2].playerId == PLAYER_ID.PIGGI) {
+        //         if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+        //             this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+        //         if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+        //             this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+        //     }
+        // } else {
+        //     if (this.playersArr[0].coins >= 10) {
+        //         this.playersArr[0].coins -= 10;
+        //         this.gameBank += 10;
+        //     } else {
+        //         if (this.playersArr[0].playerState == PLAYERSTATE.PASSED)
+        //             this.playersArr[0].playerState = PLAYERSTATE.OUTGAME;
+
+        //         if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
+        //             this.playersArr[0].playerState = PLAYERSTATE.PASSED;
+        //     }
+
+        //     if (this.playersArr[2].playerId == PLAYER_ID.PIGGI) {
+        //         if (this.playersArr[2].coins >= 10) {
+        //             this.playersArr[2].coins -= 10;
+        //             this.gameBank += 10;
+        //         } else {
+        //             if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+        //                 this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+
+        //             if (this.playersArr[2].playerState == PLAYERSTATE.INGAME)
+        //                 this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+        //         }
+        //     }
+        // }
+
+        //this.gameState == GAMESTATE.END;
+
+        switch(globalThis.numLevel){
+            case 1:
+                this.playRiver1(isBet); // для хрюши и ослика
+            break;
+            case 2:
+                this.playRiver2(isBet); // изабелла и пират
+            break;
+            case 3:
+                this.playRiver3(isBet); // третий уровень
+            break;
+        }
+            
+        this.checkGameState();
+
+        if(this.gameState == GAMESTATE.END) return;
+
+        //this.gameState = GAMESTATE.TERN;
+
+        tableArr.push(this.shuffledArr.pop());
+
+        this.playersArr.forEach((plr) => {
+            if (plr.playerState == PLAYERSTATE.INGAME)
+                plr.river();
+        })
+
+        this.myTableArr = tableArr;
+    }
+
+    playRiver1(isBet:boolean){
+        if (this.playersArr[1].playerId == PLAYER_ID.OSLIK) {
             if (this.playersArr[1].coins >= 10) {
                 this.playersArr[1].coins -= 10;
                 this.gameBank += 10;
@@ -555,7 +899,7 @@ export class GameManager {
             if (this.playersArr[0].playerState == PLAYERSTATE.INGAME)
                 this.playersArr[0].playerState = PLAYERSTATE.PASSED;
 
-            if (this.playersArr[2].name == "piggi") {
+            if (this.playersArr[2].playerId == PLAYER_ID.PIGGI) {
                 if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
                     this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
 
@@ -574,7 +918,7 @@ export class GameManager {
                     this.playersArr[0].playerState = PLAYERSTATE.PASSED;
             }
 
-            if (this.playersArr[2].name == "piggi") {
+            if (this.playersArr[2].playerId == PLAYER_ID.PIGGI) {
                 if (this.playersArr[2].coins >= 10) {
                     this.playersArr[2].coins -= 10;
                     this.gameBank += 10;
@@ -587,23 +931,83 @@ export class GameManager {
                 }
             }
         }
+    }
 
-        //this.gameState == GAMESTATE.END;
-            
-        this.checkGameState();
+    playRiver2(isBet: boolean) {
+        if (this.playersArr[1].playerState == PLAYERSTATE.INGAME) {
+            if (this.playersArr[1].coins >= 10) {
+                this.playersArr[1].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            }
+        }else {
+            if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+        }
 
-        if(this.gameState == GAMESTATE.END) return;
+        if (this.playersArr[2].playerState == PLAYERSTATE.INGAME) {
+            if (this.playersArr[2].coins >= 10) {
+                this.playersArr[2].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+        }else {
+            if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+        }
+    }
 
-        //this.gameState = GAMESTATE.TERN;
+    playRiver3(isBet: boolean){
+        if (this.playersArr[1].playerId == PLAYER_ID.FROG) {
+            if (this.playersArr[1].coins >=  this.playersArr[0].coins &&
+                this.playersArr[1].coins  >=  this.playersArr[2].coins) {
+                if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                    this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
+                if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                    this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+            } else {
+                if (this.playersArr[1].coins >= 10) {
+                    this.playersArr[1].coins -= 10;
+                    this.gameBank += 10;
+                } else {
+                    if (this.playersArr[1].playerState == PLAYERSTATE.PASSED)
+                        this.playersArr[1].playerState = PLAYERSTATE.OUTGAME;
 
-        tableArr.push(this.shuffledArr.pop());
+                    if (this.playersArr[1].playerState == PLAYERSTATE.INGAME)
+                        this.playersArr[1].playerState = PLAYERSTATE.PASSED;
+                }
+            }
+        }
 
-        this.playersArr.forEach((plr) => {
-            if (plr.playerState == PLAYERSTATE.INGAME)
-                plr.river();
-        })
+        if (this.playersArr[2].playerState == PLAYERSTATE.INGAME) {
+            if (this.playersArr[2].coins >= 10) {
+                this.playersArr[2].coins -= 10;
+                this.gameBank += 10;
+            } else {
+                this.playersArr[2].playerState = PLAYERSTATE.PASSED;
+            }
+        }else {
+            if (this.playersArr[2].playerState == PLAYERSTATE.PASSED)
+                this.playersArr[2].playerState = PLAYERSTATE.OUTGAME;
+        }
+    }
 
-        this.myTableArr = tableArr;
+
+    updateLevel(){
+        switch(globalThis.numLevel){
+            case 1:
+                this.myUser.update(PLAYER_ID.USER,70);
+                this.myLeftBot.update(PLAYER_ID.OSLIK, 70);
+                this.myRightBot.update(PLAYER_ID.PIGGI, 70);
+            break;
+            case 2:
+                this.myUser.update(PLAYER_ID.USER,70);
+                this.myLeftBot.update(PLAYER_ID.PIRATE, 70);
+                this.myRightBot.update(PLAYER_ID.IZABELLE, 70);
+            break;
+        }
     }
 }
 
@@ -845,18 +1249,20 @@ function findCombi(setArr: Array<number>): combi {
 
 class User implements IPlayer
 {
-    name: string;
+    //name: string;
     coins:number;
     playerState:PLAYERSTATE;
     twoCardArr:Array<number>;
     myCombi:combi;
+    playerId: PLAYER_ID;
 
-    constructor(name: string, coins:number)
+    constructor(playerId: PLAYER_ID, coins:number)
     {
-        this.name = name;
+        //this.name = name;
         this.coins =coins;
         this.twoCardArr=[];
         this.playerState = PLAYERSTATE.INGAME;
+        this.playerId = playerId;
     }
 
     doBet(bool:boolean):boolean{
@@ -963,22 +1369,31 @@ class User implements IPlayer
             this.myCombi = bestCombi;
         }
     }
+
+    update(playerId, coins){
+        this.coins =coins;
+        this.twoCardArr = [];
+        this.playerState = PLAYERSTATE.INGAME;
+        this.playerId = playerId;
+    }
 }
 
 class  LeftBot implements IPlayer
 {
-    name: string;
+    //name: string;
     coins:number;
     playerState:PLAYERSTATE;
     twoCardArr:Array<number>;
     myCombi:combi;
+    playerId: PLAYER_ID;
 
-    constructor(name: string, coins:number)
+    constructor(playerId: PLAYER_ID, coins:number)
     {
-        this.name = name;
+        //this.name = name;
         this.coins =coins;
         this.twoCardArr = [];
         this.playerState = PLAYERSTATE.INGAME;
+        this.playerId = playerId;
     }
 
     doBet():boolean{
@@ -1066,23 +1481,32 @@ class  LeftBot implements IPlayer
                 bestCombi.cardValue > this.myCombi.cardValue)) {
             this.myCombi = bestCombi;
         }
+    }
+
+    update(playerId, coins){
+        this.coins =coins;
+        this.twoCardArr = [];
+        this.playerState = PLAYERSTATE.INGAME;
+        this.playerId = playerId;
     }
 }
 
 class  RightBot implements IPlayer
 {
-    name: string;
+    //name: string;
     coins:number;
     playerState:PLAYERSTATE;
     twoCardArr:Array<number>;
     myCombi:combi;
+    playerId: PLAYER_ID;
 
-    constructor(name: string, coins:number)
+    constructor(playerId: PLAYER_ID, coins:number)
     {
-        this.name = name;
+        //this.name = name;
         this.coins =coins;
         this.twoCardArr = [];
         this.playerState = PLAYERSTATE.INGAME;
+        this.playerId = playerId;
     }
 
     doBet():boolean{
@@ -1170,5 +1594,12 @@ class  RightBot implements IPlayer
                 bestCombi.cardValue > this.myCombi.cardValue)) {
             this.myCombi = bestCombi;
         }
+    }
+
+    update(playerId, coins){
+        this.coins =coins;
+        this.twoCardArr = [];
+        this.playerState = PLAYERSTATE.INGAME;
+        this.playerId = playerId;
     }
 }

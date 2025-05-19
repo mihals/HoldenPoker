@@ -1,11 +1,13 @@
 import * as Phaser from 'phaser';
 import { PokerRoom } from './pokerRoom';
 
+enum LEVELSTATE{COMPLETED, ENABLE, DISABLE};
 let myGame: Phaser.Game;
 
 export function startGame(){
 
-    globalThis.levelsData = [];
+    globalThis.levelsData = {playerName:"Me", 
+        playerAchiev:[{numLvl:1, coins:0, levelState:LEVELSTATE.ENABLE}]};
 
     const config = {
         type: Phaser.AUTO,

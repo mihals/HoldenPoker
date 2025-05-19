@@ -4,7 +4,7 @@ declare global{
     var gData;
     var lang: string;
 
-    enum LEVELSTATE{COMPLETED, ENABLE, DISABLE}
+    enum LEVELSTATE{COMPLETED=0, ENABLE=1, DISABLE=2}
 
     type PlayerData = {
         name:string,
@@ -12,11 +12,12 @@ declare global{
     }
 
     type LevelData = {
-        playersData: Array<PlayerData>,
+        numLvl: number,
+        coins: number,
         levelState: LEVELSTATE
     }
     
-    type LevelsData = Array<LevelData>; 
+    type LevelsData = { playerName:string, playerAchiev: Array<LevelData>}; 
 
     /** данные о достижениях игрока в виде массива с данными уровней*/
     var levelsData:LevelsData;
